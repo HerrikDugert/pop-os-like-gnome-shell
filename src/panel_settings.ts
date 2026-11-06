@@ -84,7 +84,6 @@ export class Indicator {
 
         bm.addMenuItem(menu_separator(''));
         bm.addMenuItem(shortcuts(bm));
-        bm.addMenuItem(settings_button(bm));
         bm.addMenuItem(menu_separator(''));
 
         if (!Utils.is_wayland()) {
@@ -108,24 +107,6 @@ export class Indicator {
 
 function menu_separator(text: any): any {
     return new PopupSeparatorMenuItem(text);
-}
-
-function settings_button(menu: any): any {
-    let item = new PopupMenuItem(_('View All'));
-    item.connect('activate', () => {
-        let path: string | null = GLib.find_program_in_path('pop-shell-shortcuts');
-        if (path) {
-            spawn([path]);
-        } else {
-            spawn(['xdg-open', 'https://support.system76.com/articles/pop-keyboard-shortcuts/']);
-        }
-
-        menu.close();
-    });
-
-    item.label.get_clutter_text().set_margin_left(12);
-
-    return item;
 }
 
 function floating_window_exceptions(ext: Ext, menu: any): any {
@@ -197,7 +178,13 @@ function shortcuts(menu: any): any {
     [
         [_('Launcher'), launcher_shortcut],
         [_('Navigate Windows'), _('Super + Arrow Keys')],
+        [_('Move Windows'), _('Super + Shift + Arrow Keys')],
         [_('Toggle Tiling'), _('Super + Y')],
+        [_('Toggle Floating'), _('Super + G')],
+        [_('Toggle Stacking'), _('Super + S')],
+        [_('Change Orientation'), _('Super + O')],
+        [_('Launch Terminal'), _('Super + Enter')],
+        [_('Launch Files'), _('Super + F')],
     ].forEach((section, idx) => {
         let key = create_label(section[0]);
         key.get_clutter_text().set_margin_left(12);

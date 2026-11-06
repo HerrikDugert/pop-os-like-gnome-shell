@@ -658,7 +658,9 @@ export class ShellWindow {
     update_border_style() {
         const { settings } = this.ext;
         const color_value = settings.hint_color_rgba();
-        const radius_value = settings.active_hint_border_radius();
+        const radius_value = (this.is_maximized() || this.is_single_max_screen())
+            ? 0
+            : settings.active_hint_border_radius();
         if (this.border) {
             this.border.set_style(`border-color: ${color_value}; border-radius: ${radius_value}px;`);
         }

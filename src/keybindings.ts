@@ -3,6 +3,7 @@ import type { Ext } from './extension.js';
 import { wm } from 'resource:///org/gnome/shell/ui/main.js';
 import Shell from 'gi://Shell';
 import Meta from 'gi://Meta';
+import { spawn } from 'resource:///org/gnome/shell/misc/util.js';
 
 export class Keybindings {
     global: Object;
@@ -14,7 +15,8 @@ export class Keybindings {
         this.ext = ext;
         this.global = {
             'activate-launcher': () => ext.window_search.open(ext),
-            'tile-enter': () => ext.tiler.enter(ext),
+            'launch-terminal': () => spawn(['ptyxis', '--new-window']),
+            'launch-files': () => spawn(['nautilus', '--new-window']),
         };
 
         this.window_focus = {

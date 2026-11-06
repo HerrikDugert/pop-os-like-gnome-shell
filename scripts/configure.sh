@@ -84,14 +84,14 @@ set_keybindings() {
     dconf write ${KEYS_GNOME_WM}/toggle-maximized "['<Super>m']"
     # Lock screen
     dconf write ${KEYS_MEDIA}/screensaver "['<Super>Escape']"
-    # Home folder
-    dconf write ${KEYS_MEDIA}/home "['<Super>f']"
+    # Launch files: handled by Pop Shell (opens a new window each time)
+    dconf write ${KEYS_MEDIA}/home "@as []"
     # Launch email client
     dconf write ${KEYS_MEDIA}/email "['<Super>e']"
     # Launch web browser
     dconf write ${KEYS_MEDIA}/www "['<Super>b']"
-    # Launch terminal
-    dconf write ${KEYS_MEDIA}/terminal "['<Super>t']"
+    # Launch terminal: handled by Pop Shell
+    dconf write ${KEYS_MEDIA}/terminal "@as []"
     # Rotate Video Lock
     dconf write ${KEYS_MEDIA}/rotate-video-lock-static "@as []"
 

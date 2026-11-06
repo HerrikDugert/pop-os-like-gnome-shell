@@ -132,6 +132,16 @@
             <summary>Search key combo</summary>
         </key>
 
+        <key type="as" name="launch-terminal">
+            <default><![CDATA[['<Super>Return','<Super>t','<Super>KP_Enter']]]></default>
+            <summary>Launch a new terminal window</summary>
+        </key>
+
+        <key type="as" name="launch-files">
+            <default><![CDATA[['<Super>f']]]></default>
+            <summary>Launch a new files window</summary>
+        </key>
+
         <!-- Window Management Keys -->
         <key type="as" name="toggle-stacking">
             <default><![CDATA[['s']]]></default>
@@ -149,7 +159,7 @@
         </key>
 
         <key type="as" name="tile-enter">
-            <default><![CDATA[['<Super>Return','<Super>KP_Enter']]]></default>
+            <default><![CDATA[['<Super><Shift>Return','<Super><Shift>KP_Enter']]]></default>
             <summary>Enter tiling mode</summary>
         </key>
 

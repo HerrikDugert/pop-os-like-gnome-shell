@@ -14,7 +14,6 @@ import {
 } from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import { Button } from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import GLib from 'gi://GLib';
-import { spawn } from 'resource:///org/gnome/shell/misc/util.js';
 import { get_current_path } from './paths.js';
 // import * as Settings from './settings.js';
 
@@ -83,7 +82,7 @@ export class Indicator {
         bm.addMenuItem(floating_window_exceptions(ext, bm));
 
         bm.addMenuItem(menu_separator(''));
-        bm.addMenuItem(shortcuts(bm));
+        bm.addMenuItem(shortcuts());
         bm.addMenuItem(menu_separator(''));
 
         if (!Utils.is_wayland()) {
@@ -134,22 +133,13 @@ function floating_window_exceptions(ext: Ext, menu: any): any {
     return base;
 }
 
-function shortcuts(menu: any): any {
+function shortcuts(): any {
     let layout_manager = new Clutter.GridLayout({ orientation: Clutter.Orientation.HORIZONTAL });
     let widget = new St.Widget({ layout_manager, x_expand: true });
 
     let item = new PopupBaseMenuItem();
     item.add_child(widget);
-    item.connect('activate', () => {
-        let path: string | null = GLib.find_program_in_path('pop-shell-shortcuts');
-        if (path) {
-            spawn([path]);
-        } else {
-            spawn(['xdg-open', 'https://support.system76.com/articles/pop-keyboard-shortcuts/']);
-        }
-
-        menu.close();
-    });
+    item.reactive = false;
 
     function create_label(text: string): any {
         return new St.Label({ text });

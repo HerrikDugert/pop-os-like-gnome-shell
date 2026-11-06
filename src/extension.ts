@@ -1253,14 +1253,13 @@ export class Ext extends Ecs.System<ExtEvent> {
             // get the current window rect
             let rect = win.rect();
 
-            let h_ratio: number = 1;
-            let w_ratio: number = 1;
+            // Scale the window so it keeps its relative size on the new monitor,
+            // but clamp it to the new monitor's work area so it never overflows.
+            let h_ratio: number = next_area.height / prev_area.height;
+            let w_ratio: number = next_area.width / prev_area.width;
 
-            h_ratio = next_area.height / prev_area.height;
-            rect.height = rect.height * h_ratio;
-
-            w_ratio = next_area.width / prev_area.width;
-            rect.width = rect.width * w_ratio;
+            rect.height = Math.min(next_area.height, Math.round(rect.height * h_ratio));
+            rect.width = Math.min(next_area.width, Math.round(rect.width * w_ratio));
 
             if (next_area.x < prev_area.x) {
                 rect.x = ((next_area.x + rect.x - prev_area.x) / prev_area.width) * next_area.width;
@@ -1274,6 +1273,10 @@ export class Ext extends Ecs.System<ExtEvent> {
                 rect.y = (rect.y / prev_area.height) * next_area.height + next_area.y;
             }
 
+            // Keep the window fully inside the new monitor's work area.
+            rect.x = Math.max(next_area.x, Math.min(rect.x, next_area.x + next_area.width - rect.width));
+            rect.y = Math.max(next_area.y, Math.min(rect.y, next_area.y + next_area.height - rect.height));
+
             if (this.auto_tiler) {
                 if (this.is_floating(win)) {
                     win.meta.unmaximize(Meta.MaximizeFlags.BOTH);
@@ -1282,7 +1285,6 @@ export class Ext extends Ecs.System<ExtEvent> {
                 this.register(Events.window_move(this, win, rect));
             } else {
                 win.move(this, rect, () => { });
-                // if the resulting dimensions of rect == next
                 if (rect.width == next_area.width && rect.height == next_area.height) {
                     win.meta.maximize(Meta.MaximizeFlags.BOTH);
                 }

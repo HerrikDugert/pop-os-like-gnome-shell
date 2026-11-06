@@ -113,6 +113,21 @@ declare module 'gi://GLib' {
     export default gLib;
 }
 
+// Mtk module declaration (GNOME 43+, Mutter Toolkit)
+// Mtk.Rectangle replaces Meta.Rectangle in newer GNOME versions
+declare module 'gi://Mtk' {
+    namespace Mtk {
+        class Rectangle {
+            constructor(params?: { x: number; y: number; width: number; height: number });
+            x: number;
+            y: number;
+            width: number;
+            height: number;
+        }
+    }
+    export default Mtk;
+}
+
 declare interface GLib {
     PRIORITY_DEFAULT: number;
     PRIORITY_LOW: number;

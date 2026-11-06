@@ -44,10 +44,11 @@ import Gio from 'gi://Gio';
 import St from 'gi://St';
 import Shell from 'gi://Shell';
 import Meta from 'gi://Meta';
-// Try to import Mtk for newer GNOME versions, fallback to Meta for older versions
+// Import Mtk for GNOME 43+ (where Meta.Rectangle was moved to Mtk.Rectangle)
+// On older GNOME versions where Mtk doesn't exist, we fall back to Meta
 let Mtk: any;
 try {
-    Mtk = imports.gi.Mtk;
+    Mtk = (await import('gi://Mtk')).default;
 } catch (e) {
     Mtk = null;
 }
@@ -1258,8 +1259,6 @@ export class Ext extends Ecs.System<ExtEvent> {
 
             if (this.auto_tiler) {
                 if (this.is_floating(win)) {
-                    win.meta.unmaximize(Meta.MaximizeFlags.HORIZONTAL);
-                    win.meta.unmaximize(Meta.MaximizeFlags.VERTICAL);
                     win.meta.unmaximize(Meta.MaximizeFlags.BOTH);
                 }
 
@@ -2605,10 +2604,37 @@ export class Ext extends Ecs.System<ExtEvent> {
             };
 
             if (this.auto_tiler && !win.meta.minimized && win.is_tilable(this)) {
-                let id = actor.connect('first-frame', () => {
+                let tiled = false;
+                let signal_id: number | null = null;
+                let timeout_id: number | null = null;
+
+                const tile = () => {
+                    if (tiled || !win.actor_exists()) return;
+                    tiled = true;
+
+                    if (timeout_id !== null) {
+                        GLib.source_remove(timeout_id);
+                        timeout_id = null;
+                    }
+
+                    if (signal_id !== null) {
+                        actor.disconnect(signal_id);
+                        signal_id = null;
+                    }
+
                     this.auto_tiler?.auto_tile(this, win, this.init);
                     grab_focus();
-                    actor.disconnect(id);
+                };
+
+                signal_id = actor.connect('first-frame', tile);
+
+                // `first-frame` may never fire in some environments (for
+                // example headless sessions where no frame is painted), so
+                // keep a short timeout as a fallback to ensure tiling.
+                timeout_id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 250, () => {
+                    timeout_id = null;
+                    tile();
+                    return GLib.SOURCE_REMOVE;
                 });
             } else {
                 grab_focus();

@@ -1,3 +1,4 @@
+import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
 
@@ -40,27 +41,20 @@ export class Column {
 
 export var ShortcutOverlay = GObject.registerClass(
     class ShortcutOverlay extends St.BoxLayout {
-        title: string;
-        columns: Array<Column>;
-
-        constructor() {
-            super();
-            this.title = '';
-            this.columns = new Array();
-        }
+        title: string = '';
+        columns: Array<Column> = new Array();
 
         _init(title: string, columns: Array<Column>) {
-            super.init({
+            super._init({
                 styleClass: 'pop-shell-shortcuts',
-                destroyOnClose: false,
-                shellReactive: true,
-                shouldFadeIn: true,
-                shouldFadeOut: true,
             });
+
+            this.title = title;
+            this.columns = columns;
 
             let columns_layout = new St.BoxLayout({
                 styleClass: 'pop-shell-shortcuts-columns',
-                horizontal: true,
+                orientation: Clutter.Orientation.HORIZONTAL,
             });
 
             for (const column of columns) {
@@ -69,20 +63,20 @@ export var ShortcutOverlay = GObject.registerClass(
                 });
 
                 for (const section of column.sections) {
-                    column_layout.add(this.gen_section(section));
+                    column_layout.add_child(this.gen_section(section));
                 }
 
-                columns_layout.add(column_layout);
+                columns_layout.add_child(column_layout);
             }
 
-            this.add(
+            this.add_child(
                 new St.Label({
                     styleClass: 'pop-shell-shortcuts-title',
                     text: title,
                 }),
             );
 
-            this.add(columns_layout);
+            this.add_child(columns_layout);
 
             // TODO: Add hyperlink for shortcuts in settings
         }
@@ -90,11 +84,11 @@ export var ShortcutOverlay = GObject.registerClass(
         gen_combination(combination: Array<string>) {
             let layout = new St.BoxLayout({
                 styleClass: 'pop-shell-binding',
-                horizontal: true,
+                orientation: Clutter.Orientation.HORIZONTAL,
             });
 
             for (const key of combination) {
-                layout.add(St.Label({ text: key }));
+                layout.add_child(new St.Label({ text: key }));
             }
 
             return layout;
@@ -105,7 +99,7 @@ export var ShortcutOverlay = GObject.registerClass(
                 styleclass: 'pop-shell-section',
             });
 
-            layout.add(
+            layout.add_child(
                 new St.Label({
                     styleClass: 'pop-shell-section-header',
                     text: section.header,
@@ -113,8 +107,8 @@ export var ShortcutOverlay = GObject.registerClass(
             );
 
             for (const subsection of section.shortcuts) {
-                layout.add(separator());
-                layout.add(this.gen_shortcut(subsection));
+                layout.add_child(separator());
+                layout.add_child(this.gen_shortcut(subsection));
             }
 
             return layout;
@@ -123,10 +117,10 @@ export var ShortcutOverlay = GObject.registerClass(
         gen_shortcut(shortcut: Shortcut) {
             let layout = new St.BoxLayout({
                 styleClass: 'pop-shell-shortcut',
-                horizontal: true,
+                orientation: Clutter.Orientation.HORIZONTAL,
             });
 
-            layout.add(
+            layout.add_child(
                 new St.Label({
                     text: shortcut.description,
                 }),
@@ -135,8 +129,8 @@ export var ShortcutOverlay = GObject.registerClass(
             // for (const binding of shortcut.bindings) {
             //     join(
             //         binding.values(),
-            //         (comb) => layout.add(this.gen_combination(comb)),
-            //         () => layout.add(new St.Label({ text: 'or' }))
+            //         (comb) => layout.add_child(this.gen_combination(comb)),
+            //         () => layout.add_child(new St.Label({ text: 'or' }))
             //     );
             // }
 

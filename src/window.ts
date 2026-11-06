@@ -251,7 +251,6 @@ export class ShellWindow {
         if (!icon) {
             icon = new St.Icon({
                 icon_name: 'applications-other',
-                icon_type: St.IconType.FULLCOLOR,
                 icon_size: size,
             });
         }
@@ -266,9 +265,14 @@ export class ShellWindow {
     }
 
     is_client_decorated(): boolean {
-        // look I guess I'll hack something together in here if at all possible
-        // Because Meta.Window.is_client_decorated() was removed in Meta 15, using it breaks the extension in gnome 47 or higher
-        //return this.meta.window_type == Meta.WindowType.META_WINDOW_OVERRIDE_OTHER;
+        // Meta.Window.is_client_decorated() was removed in Meta 15 (GNOME 47).
+        // On Wayland (GNOME 50+ is Wayland-only), xprop doesn't work, so we
+        // use the 'decorated' property: if the WM is NOT drawing decorations,
+        // then the client is drawing its own (client-side decorations).
+        if (utils.is_wayland()) {
+            return !this.meta.decorated;
+        }
+        // X11 fallback: check _GTK_FRAME_EXTENTS via xprop
         const xid = this.xid();
         const extents = xid ? xprop.get_frame_extents(xid) : false;
         if (!extents) return false;

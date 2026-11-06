@@ -1305,7 +1305,29 @@ export class Ext extends Ecs.System<ExtEvent> {
                 this.auto_tiler.detach_window(this, win.entity);
                 this.auto_tiler.attach_to_workspace(this, win, [next_monitor[0], win.workspace_id()]);
             } else {
-                this.workspace_window_move(win, prev_monitor, next_monitor[0]);
+                const prev_area = win.meta.get_work_area_for_monitor(prev_monitor);
+                const next_area = win.meta.get_work_area_for_monitor(next_monitor[0]);
+
+                if (prev_area && next_area) {
+                    let rect = win.rect();
+                    const h_ratio = next_area.height / prev_area.height;
+                    const w_ratio = next_area.width / prev_area.width;
+
+                    rect.height = Math.round(rect.height * h_ratio);
+                    rect.width = Math.round(rect.width * w_ratio);
+                    rect.x = next_area.x + Math.round((rect.x - prev_area.x) * (next_area.width / prev_area.width));
+                    rect.y = next_area.y + Math.round((rect.y - prev_area.y) * (next_area.height / prev_area.height));
+                    rect.x = Math.max(next_area.x, Math.min(rect.x, next_area.x + next_area.width - rect.width));
+                    rect.y = Math.max(next_area.y, Math.min(rect.y, next_area.y + next_area.height - rect.height));
+                    rect.width = Math.min(rect.width, next_area.width);
+                    rect.height = Math.min(rect.height, next_area.height);
+
+                    win.move(this, rect, () => { });
+
+                    if (rect.width === next_area.width && rect.height === next_area.height) {
+                        win.meta.maximize(Meta.MaximizeFlags.BOTH);
+                    }
+                }
             }
         }
 

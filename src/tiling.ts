@@ -229,6 +229,15 @@ export class Tiler {
                     }
 
                     if (move_to !== null) this.move_auto(ext, focused, move_to, direction === Direction.Left);
+                    else if (direction === Direction.Up || direction === Direction.Down) {
+                        // Continue moving the window onto the adjacent workspace
+                        // when there is no tile left in that direction.
+                        ext.move_workspace(
+                            direction === Direction.Up
+                                ? Meta.DisplayDirection.UP
+                                : Meta.DisplayDirection.DOWN,
+                        );
+                    }
                     this.moving = false;
                     place_pointer();
                 }

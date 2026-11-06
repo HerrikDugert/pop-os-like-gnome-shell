@@ -468,25 +468,23 @@ export class ShellWindow {
             };
 
             if (permitted()) {
-                if (this.meta.appears_focused) {
+                border.show();
+
+                // Focus will be re-applied to fix windows moving across workspaces
+                let applications = 0;
+
+                // Ensure that the border is shown
+                if (ACTIVE_HINT_SHOW_ID !== null) GLib.source_remove(ACTIVE_HINT_SHOW_ID);
+                ACTIVE_HINT_SHOW_ID = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 600, () => {
+                    if ((applications > 4 && !this.same_workspace()) || !permitted()) {
+                        ACTIVE_HINT_SHOW_ID = null;
+                        return GLib.SOURCE_REMOVE;
+                    }
+
+                    applications += 1;
                     border.show();
-
-                    // Focus will be re-applied to fix windows moving across workspaces
-                    let applications = 0;
-
-                    // Ensure that the border is shown
-                    if (ACTIVE_HINT_SHOW_ID !== null) GLib.source_remove(ACTIVE_HINT_SHOW_ID);
-                    ACTIVE_HINT_SHOW_ID = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 600, () => {
-                        if ((applications > 4 && !this.same_workspace()) || !permitted()) {
-                            ACTIVE_HINT_SHOW_ID = null;
-                            return GLib.SOURCE_REMOVE;
-                        }
-
-                        applications += 1;
-                        border.show();
-                        return GLib.SOURCE_CONTINUE;
-                    });
-                }
+                    return GLib.SOURCE_CONTINUE;
+                });
             }
         }
     }

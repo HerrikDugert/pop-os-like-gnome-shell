@@ -26,6 +26,14 @@ export class Keybindings {
 
             'focus-right': () => ext.focus_right(),
 
+            'focus-monitor-left': () => ext.focus_monitor(Meta.DisplayDirection.LEFT),
+
+            'focus-monitor-down': () => ext.focus_monitor(Meta.DisplayDirection.DOWN),
+
+            'focus-monitor-up': () => ext.focus_monitor(Meta.DisplayDirection.UP),
+
+            'focus-monitor-right': () => ext.focus_monitor(Meta.DisplayDirection.RIGHT),
+
             'tile-orientation': () => {
                 const win = ext.focus_window();
                 if (win && ext.auto_tiler) {

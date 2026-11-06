@@ -105,6 +105,27 @@
             <summary>Focus right window</summary>
         </key>
 
+        <!-- Focus Shifting Between Displays -->
+        <key type="as" name="focus-monitor-left">
+            <default><![CDATA[['<Super><Alt>Left','<Super><Alt>KP_Left','<Super><Alt>h']]]></default>
+            <summary>Focus the display to the left</summary>
+        </key>
+
+        <key type="as" name="focus-monitor-down">
+            <default><![CDATA[['<Super><Alt>Down','<Super><Alt>KP_Down','<Super><Alt>j']]]></default>
+            <summary>Focus the display below</summary>
+        </key>
+
+        <key type="as" name="focus-monitor-up">
+            <default><![CDATA[['<Super><Alt>Up','<Super><Alt>KP_Up','<Super><Alt>k']]]></default>
+            <summary>Focus the display above</summary>
+        </key>
+
+        <key type="as" name="focus-monitor-right">
+            <default><![CDATA[['<Super><Alt>Right','<Super><Alt>KP_Right','<Super><Alt>l']]]></default>
+            <summary>Focus the display to the right</summary>
+        </key>
+
         <!-- Launcher -->
         <key type="as" name="activate-launcher">
             <default><![CDATA[['<Super>slash']]]></default>
@@ -175,22 +196,22 @@
         </key>
 
         <key type="as" name="tile-move-left-global">
-            <default><![CDATA[[]]]></default>
+            <default><![CDATA[['<Super><Shift>Left','<Super><Shift>KP_Left','<Super><Shift>h']]]></default>
             <summary>Move window left</summary>
         </key>
 
         <key type="as" name="tile-move-down-global">
-            <default><![CDATA[[]]]></default>
+            <default><![CDATA[['<Super><Shift>Down','<Super><Shift>KP_Down','<Super><Shift>j']]]></default>
             <summary>Move window down</summary>
         </key>
 
         <key type="as" name="tile-move-up-global">
-            <default><![CDATA[[]]]></default>
+            <default><![CDATA[['<Super><Shift>Up','<Super><Shift>KP_Up','<Super><Shift>k']]]></default>
             <summary>Move window up</summary>
         </key>
 
         <key type="as" name="tile-move-right-global">
-            <default><![CDATA[[]]]></default>
+            <default><![CDATA[['<Super><Shift>Right','<Super><Shift>KP_Right','<Super><Shift>l']]]></default>
             <summary>Move window right</summary>
         </key>
 
@@ -244,32 +265,32 @@
         <!-- Workspace Management -->
 
         <key type="as" name="pop-workspace-down">
-            <default><![CDATA[['<Super><Shift>Down','<Super><Shift>KP_Down','<Super><Shift>j']]]></default>
+            <default><![CDATA[['<Super><Shift><Primary>Down','<Super><Shift><Primary>KP_Down','<Super><Shift><Primary>j']]]></default>
             <summary>Move window to the lower workspace</summary>
         </key>
 
         <key type="as" name="pop-workspace-up">
-            <default><![CDATA[['<Super><Shift>Up','<Super><Shift>KP_Up','<Super><Shift>k']]]></default>
+            <default><![CDATA[['<Super><Shift><Primary>Up','<Super><Shift><Primary>KP_Up','<Super><Shift><Primary>k']]]></default>
             <summary>Move window to the upper workspace</summary>
         </key>
 
         <key type="as" name="pop-monitor-down">
-            <default><![CDATA[['<Super><Shift><Primary>Down','<Super><Shift><Primary>KP_Down','<Super><Shift><Primary>j']]]></default>
+            <default><![CDATA[['<Super><Shift><Alt>Down','<Super><Shift><Alt>KP_Down','<Super><Shift><Alt>j']]]></default>
             <summary>Move window to the lower monitor</summary>
         </key>
 
         <key type="as" name="pop-monitor-up">
-            <default><![CDATA[['<Super><Shift><Primary>Up','<Super><Shift><Primary>KP_Up','<Super><Shift><Primary>k']]]></default>
+            <default><![CDATA[['<Super><Shift><Alt>Up','<Super><Shift><Alt>KP_Up','<Super><Shift><Alt>k']]]></default>
             <summary>Move window to the upper monitor</summary>
         </key>
 
         <key type="as" name="pop-monitor-left">
-            <default><![CDATA[['<Super><Shift>Left','<Super><Shift>KP_Left','<Super><Shift>h']]]></default>
+            <default><![CDATA[['<Super><Shift><Alt>Left','<Super><Shift><Alt>KP_Left','<Super><Shift><Alt>h']]]></default>
             <summary>Move window to the leftward monitor</summary>
         </key>
 
         <key type="as" name="pop-monitor-right">
-            <default><![CDATA[['<Super><Shift>Right','<Super><Shift>KP_Right','<Super><Shift>l']]]></default>
+            <default><![CDATA[['<Super><Shift><Alt>Right','<Super><Shift><Alt>KP_Right','<Super><Shift><Alt>l']]]></default>
             <summary>Move window to the rightward monitor</summary>
         </key>
 

@@ -5,4 +5,8 @@
   <KeyListEntry name="focus-left" description="Switch focus to window left"/>
   <KeyListEntry name="focus-right" description="Switch focus to window right"/>
   <KeyListEntry name="focus-up" description="Switch focus to window up"/>
+  <KeyListEntry name="focus-monitor-left" description="Switch focus to the display on the left"/>
+  <KeyListEntry name="focus-monitor-right" description="Switch focus to the display on the right"/>
+  <KeyListEntry name="focus-monitor-up" description="Switch focus to the display above"/>
+  <KeyListEntry name="focus-monitor-down" description="Switch focus to the display below"/>
 </KeyListEntries>

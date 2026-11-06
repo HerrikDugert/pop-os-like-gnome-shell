@@ -46,10 +46,10 @@ set_keybindings() {
     dconf write ${KEYS_GNOME_SHELL}/toggle-message-tray "@as ['<Super>v']"
     # Show the activities overview: disable <Super>s
     dconf write ${KEYS_GNOME_SHELL}/toggle-overview "@as []"
-    # Switch to workspace left: disable <Super>Left
-    dconf write ${KEYS_GNOME_WM}/switch-to-workspace-left "@as []"
-    # Switch to workspace right: disable <Super>Right
-    dconf write ${KEYS_GNOME_WM}/switch-to-workspace-right "@as []"
+    # Switch to workspace left: move from <Super>Left to <Super><Primary>Left
+    dconf write ${KEYS_GNOME_WM}/switch-to-workspace-left "['<Primary><Super>Left','<Primary><Super>${left}']"
+    # Switch to workspace right: move from <Super>Right to <Super><Primary>Right
+    dconf write ${KEYS_GNOME_WM}/switch-to-workspace-right "['<Primary><Super>Right','<Primary><Super>${right}']"
     # Maximize window: disable <Super>Up
     dconf write ${KEYS_GNOME_WM}/maximize "@as []"
     # Restore window: disable <Super>Down
@@ -59,7 +59,8 @@ set_keybindings() {
     # Move to monitor down: disable <Super><Shift>Down
     dconf write ${KEYS_GNOME_WM}/move-to-monitor-down "@as []"
 
-    # Super + direction keys, move window left and right monitors, or up and down workspaces
+    # Pop Shell handles <Super><Shift>direction and <Super><Shift><Alt>direction,
+    # so disable GNOME's conflicting move shortcuts.
     # Move window one monitor to the left
     dconf write ${KEYS_GNOME_WM}/move-to-monitor-left "@as []"
     # Move window one workspace down
@@ -69,7 +70,7 @@ set_keybindings() {
     # Move window one monitor to the right
     dconf write ${KEYS_GNOME_WM}/move-to-monitor-right "@as []"
 
-    # Super + Ctrl + direction keys, change workspaces, move focus between monitors
+    # Super + Ctrl + direction keys: switch workspaces
     # Move to workspace below
     dconf write ${KEYS_GNOME_WM}/switch-to-workspace-down "['<Primary><Super>Down','<Primary><Super>${down}']"
     # Move to workspace above

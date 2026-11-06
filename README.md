@@ -177,11 +177,25 @@ Disabled by default, this mode manages windows using a tree-based tiling window 
 
 ### Keyboard Shortcuts
 
-- `Super` + `O`
-  - Toggles the orientation of a fork's tiling orientation
-- `Super` + `G`
-  - Toggles a window between floating and tiling.
-  - See [#customizing the window float list](#customizing-the-floating-window-list)
+Pop Shell follows the [Pop!\_OS COSMIC keyboard shortcuts](https://system76.com/support/pop-cosmic-keyboard-shortcuts/) for navigating and moving tiled windows. `<Direction>` refers to the arrow keys, the numpad arrow keys, or their Vim equivalents (`h`, `j`, `k`, `l`).
+
+| Shortcut | Action |
+| --- | --- |
+| `Super` + `<Direction>` | Focus the window in that direction |
+| `Super` + `Alt` + `<Direction>` | Focus the display in that direction |
+| `Super` + `Ctrl` + `<Direction>` | Switch to the workspace in that direction |
+| `Super` + `Shift` + `<Direction>` | Move the focused window in that direction, then to the adjacent display |
+| `Super` + `Shift` + `Alt` + `<Direction>` | Move the focused window to the display in that direction |
+| `Super` + `Shift` + `Ctrl` + `<Direction>` | Move the focused window to the workspace in that direction |
+| `Super` + `O` | Toggles the orientation of a fork's tiling orientation |
+| `Super` + `G` | Toggles a window between floating and tiling |
+| `Super` + `Y` | Toggles auto-tiling |
+| `Super` + `S` | Toggles stacking mode |
+| `Super` + `Return` | Enters window management mode |
+
+Run `make local-install` to also configure GNOME's workspace shortcuts so that they do not conflict with Pop Shell's bindings.
+
+See [Customizing the Floating Window List](#customizing-the-floating-window-list) for instructions on keeping specific windows floating.
 
 ### Customizing the Floating Window List
 There is file `$XDG_CONFIG_HOME/pop-shell/config.json` where you can add the following structure:

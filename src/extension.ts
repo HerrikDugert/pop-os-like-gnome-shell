@@ -672,6 +672,23 @@ export class Ext extends Ecs.System<ExtEvent> {
         this.activate_window(this.focus_selector.up(this, null));
     }
 
+    /** Focuses the most recently used window on the adjacent display. */
+    focus_monitor(direction: Meta.DisplayDirection) {
+        const win = this.focus_window();
+        if (!win) return;
+
+        const monitor = Tiling.locate_monitor(win, direction);
+        if (!monitor) return;
+
+        const target = this.active_window_list().find(
+            (candidate) => candidate.meta.get_monitor() === monitor[0] && !candidate.meta.minimized,
+        );
+
+        if (target) {
+            this.activate_window(target);
+        }
+    }
+
     focus_window(): Window.ShellWindow | null {
         return this.get_window(display.get_focus_window());
     }

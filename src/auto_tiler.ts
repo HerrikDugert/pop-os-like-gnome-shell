@@ -113,6 +113,22 @@ export class AutoTiler {
             }
         }
 
+        if (fork.right) {
+            const sync = (node: any) => {
+                if (!node) return;
+                if (node.inner.kind === 2) {
+                    const w = ext.windows.get(node.inner.entity);
+                    if (w) w.smart_gapped = fork.smart_gapped;
+                } else if (node.inner.kind === 3) {
+                    for (const entity of node.inner.entities) {
+                        const w = ext.windows.get(entity);
+                        if (w) w.smart_gapped = fork.smart_gapped;
+                    }
+                }
+            };
+            sync(fork.right);
+        }
+
         fork.area = fork.set_area(rect.clone());
         fork.length_left = Math.round(fork.prev_ratio * fork.length());
         this.tile(ext, fork, fork.area);
@@ -161,6 +177,23 @@ export class AutoTiler {
                     rect.height -= ext.gap_outer * 2;
 
                     fork.set_area(rect);
+
+                    // Keep each window's smart_gapped flag in sync with the
+                    // toplevel fork so the active hint is shown/hidden correctly.
+                    const sync = (node: any) => {
+                        if (!node) return;
+                        if (node.inner.kind === 2) {
+                            const w = ext.windows.get(node.inner.entity);
+                            if (w) w.smart_gapped = false;
+                        } else if (node.inner.kind === 3) {
+                            for (const entity of node.inner.entities) {
+                                const w = ext.windows.get(entity);
+                                if (w) w.smart_gapped = false;
+                            }
+                        }
+                    };
+                    sync(fork.left);
+                    sync(fork.right);
                 }
 
                 this.tile(ext, fork, fork.area.clone());
@@ -247,6 +280,21 @@ export class AutoTiler {
                     let rect = ext.monitor_work_area(fork.monitor);
                     fork.set_area(rect);
                     fork.smart_gapped = true;
+
+                    const sync = (node: any) => {
+                        if (!node) return;
+                        if (node.inner.kind === 2) {
+                            const w = ext.windows.get(node.inner.entity);
+                            if (w) w.smart_gapped = true;
+                        } else if (node.inner.kind === 3) {
+                            for (const entity of node.inner.entities) {
+                                const w = ext.windows.get(entity);
+                                if (w) w.smart_gapped = true;
+                            }
+                        }
+                    };
+                    sync(fork.left);
+                    sync(fork.right);
                 }
 
                 this.tile(ext, fork, fork.area);

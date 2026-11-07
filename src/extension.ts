@@ -1334,7 +1334,155 @@ export class Ext extends Ecs.System<ExtEvent> {
         win.activate_after_move = true;
     }
 
+    /** Move the built-in display below or to the right of the primary display. */
+    move_builtin_display(position: 'below' | 'right') {
+        Gio.DBusProxy.new_for_bus(
+            Gio.BusType.SESSION,
+            Gio.DBusProxyFlags.NONE,
+            null,
+            'org.gnome.Mutter.DisplayConfig',
+            '/org/gnome/Mutter/DisplayConfig',
+            'org.gnome.Mutter.DisplayConfig',
+            null,
+            (_source: any, result: any) => {
+                try {
+                    const proxy = Gio.DBusProxy.new_for_bus_finish(result);
+
+                    proxy.call(
+                        'GetCurrentState',
+                        new (GLib as any).Variant('()', []),
+                        Gio.DBusCallFlags.NONE,
+                        -1,
+                        null,
+                        (_p: any, res: any) => {
+                            try {
+                                const r = (proxy as any).call_finish(res);
+                                const [serial, monitors, logical_monitors, properties] = r.deep_unpack();
+
+                                let builtinConnector: string | null = null;
+                                for (const m of monitors) {
+                                    if (m[5] && m[5]['is-builtin'] === true) {
+                                        builtinConnector = m[0];
+                                        break;
+                                    }
+                                }
+                                if (!builtinConnector) {
+                                    for (const m of monitors) {
+                                        if (typeof m[0] === 'string' && m[0].toLowerCase().startsWith('edp')) {
+                                            builtinConnector = m[0];
+                                            break;
+                                        }
+                                    }
+                                }
+                                if (!builtinConnector) {
+                                    (globalThis as any).print('move_builtin_display: no built-in display found');
+                                    return;
+                                }
+
+                                const primaryIdx = logical_monitors.findIndex((lm: any) => lm[4] === true);
+                                const builtinIdx = logical_monitors.findIndex((lm: any) => Array.isArray(lm[5]) && lm[5].some((m: any) => m[0] === builtinConnector));
+
+                                if (primaryIdx < 0 || builtinIdx < 0 || builtinIdx === primaryIdx) {
+                                    (globalThis as any).print('move_builtin_display: primary/built-in not found or is primary');
+                                    return;
+                                }
+
+                                const primary = logical_monitors[primaryIdx];
+                                const builtin = logical_monitors[builtinIdx];
+
+                                const currentMode = (monitorTuple: any) => {
+                                    const modes = monitorTuple[4];
+                                    for (const mode of modes) {
+                                        if (mode[6] && mode[6]['is-current']) return mode;
+                                    }
+                                    return modes[0];
+                                };
+
+                                const primaryMonitorTuple = monitors.find((m: any) => m[0] === primary[5][0][0]);
+                                const builtinMonitorTuple = monitors.find((m: any) => m[0] === builtinConnector);
+
+                                if (!primaryMonitorTuple || !builtinMonitorTuple) {
+                                    (globalThis as any).print('move_builtin_display: monitor tuples not found');
+                                    return;
+                                }
+
+                                const primaryMode = currentMode(primaryMonitorTuple);
+                                const primaryScale = primary[2];
+                                const primaryWidth = primaryMode[1] / primaryScale;
+                                const primaryHeight = primaryMode[2] / primaryScale;
+
+                                let newX = builtin[0];
+                                let newY = builtin[1];
+
+                                if (position === 'below') {
+                                    newX = primary[0];
+                                    newY = primary[1] + primaryHeight;
+                                } else {
+                                    newX = primary[0] + primaryWidth;
+                                    newY = primary[1];
+                                }
+
+                                const configs = logical_monitors.map((lm: any, idx: number) => {
+                                    let x = lm[0];
+                                    let y = lm[1];
+                                    if (idx === builtinIdx) {
+                                        x = newX;
+                                        y = newY;
+                                    }
+
+                                    const scale = lm[2];
+                                    const transform = lm[3];
+                                    const isPrimary = lm[4];
+                                    const monitorList = lm[5];
+
+                                    const monitors = monitorList.map((m: any) => {
+                                        const connector = m[0];
+                                        const mon = monitors.find((mm: any) => mm[0] === connector);
+                                        const mode = mon ? currentMode(mon) : null;
+                                        const modeId = mode ? mode[0] : '';
+                                        return [connector, modeId, {}];
+                                    });
+
+                                    return [x, y, scale, transform, isPrimary, monitors];
+                                });
+
+                                proxy.call(
+                                    'ApplyMonitorsConfig',
+                                    new (GLib as any).Variant('(uua(iiduba(ssa{sv}))a{sv})', [serial, 2, configs, properties]),
+                                    Gio.DBusCallFlags.NONE,
+                                    -1,
+                                    null,
+                                    (_p2: any, res2: any) => {
+                                        try {
+                                            (proxy as any).call_finish(res2);
+                                            (globalThis as any).print('move_builtin_display: moved ' + builtinConnector + ' ' + position);
+                                        } catch (e) {
+                                            (globalThis as any).print('move_builtin_display: ApplyMonitorsConfig failed: ' + e);
+                                        }
+                                    }
+                                );
+                            } catch (e) {
+                                (globalThis as any).print('move_builtin_display: GetCurrentState failed: ' + e);
+                            }
+                        }
+                    );
+                } catch (e) {
+                    (globalThis as any).print('move_builtin_display: proxy creation failed: ' + e);
+                }
+            }
+        );
+    }
+
+    move_builtin_display_below() {
+        this.move_builtin_display('below');
+    }
+
+    move_builtin_display_right() {
+        this.move_builtin_display('right');
+    }
+
     /** Moves the focused window across workspaces and displays */
+
     move_workspace(direction: Meta.DisplayDirection) {
         const win = this.focus_window();
         if (!win) return;

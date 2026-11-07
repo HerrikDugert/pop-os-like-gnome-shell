@@ -104,6 +104,21 @@ export class Indicator {
         bm.addMenuItem(floating_window_exceptions(ext, bm));
 
         bm.addMenuItem(menu_separator(''));
+        let move_below = new PopupMenuItem(_('Move Built-in Display Below Primary'));
+        move_below.connect('activate', () => {
+            ext.move_builtin_display_below();
+            GLib.timeout_add(GLib.PRIORITY_LOW, 300, () => { bm.close(); return false; });
+        });
+        bm.addMenuItem(move_below);
+
+        let move_right = new PopupMenuItem(_('Move Built-in Display Right of Primary'));
+        move_right.connect('activate', () => {
+            ext.move_builtin_display_right();
+            GLib.timeout_add(GLib.PRIORITY_LOW, 300, () => { bm.close(); return false; });
+        });
+        bm.addMenuItem(move_right);
+
+        bm.addMenuItem(menu_separator(''));
         bm.addMenuItem(shortcuts());
         bm.addMenuItem(menu_separator(''));
 

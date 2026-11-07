@@ -1361,6 +1361,7 @@ export class Ext extends Ecs.System<ExtEvent> {
 
                                 let builtinConnector: string | null = null;
                                 for (const m of monitors) {
+                                    (globalThis as any).log('move_builtin_display: monitor ' + m[0] + ' props=' + JSON.stringify(m[5]));
                                     if (m[5] && m[5]['is-builtin'] === true) {
                                         builtinConnector = m[0];
                                         break;
@@ -1368,7 +1369,8 @@ export class Ext extends Ecs.System<ExtEvent> {
                                 }
                                 if (!builtinConnector) {
                                     for (const m of monitors) {
-                                        if (typeof m[0] === 'string' && m[0].toLowerCase().startsWith('edp')) {
+                                        const name = typeof m[0] === 'string' ? m[0].toLowerCase() : '';
+                                        if (name.startsWith('edp') || name.startsWith('dsi') || name.startsWith('lvds') || name.startsWith('lcd')) {
                                             builtinConnector = m[0];
                                             break;
                                         }

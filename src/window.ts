@@ -462,7 +462,8 @@ export class ShellWindow {
                     this.actor_exists() &&
                     this.ext.focus_window() == this &&
                     !this.meta.is_fullscreen() &&
-                    this.ext.active_window_list().filter((w) => !w.meta.minimized).length > 1 &&
+                    (this.ext.active_window_list().filter((w) => !w.meta.minimized).length > 1 ||
+                    this.ext.settings.active_hint_show_on_maximized()) &&
                     !this.meta.minimized
                 );
             };
@@ -511,7 +512,8 @@ export class ShellWindow {
         if (
             this.meta.is_fullscreen() ||
             this.meta.minimized ||
-            this.ext.active_window_list().filter((w) => !w.meta.minimized).length < 2
+            (this.ext.active_window_list().filter((w) => !w.meta.minimized).length < 2 &&
+                !this.ext.settings.active_hint_show_on_maximized())
         ) {
             this.hide_border();
         }
@@ -665,8 +667,9 @@ export class ShellWindow {
         const radius_value = (this.is_maximized() || this.is_single_max_screen())
             ? 0
             : settings.active_hint_border_radius();
+        const width_value = settings.active_hint_border_width();
         if (this.border) {
-            this.border.set_style(`border-color: ${color_value}; border-radius: ${radius_value}px;`);
+            this.border.set_style(`border-color: ${color_value}; border-width: ${width_value}px; border-radius: ${radius_value}px;`);
         }
     }
 

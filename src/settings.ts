@@ -51,6 +51,8 @@ function settings_new_schema(schema: string): Settings {
 
 const ACTIVE_HINT = 'active-hint';
 const ACTIVE_HINT_BORDER_RADIUS = 'active-hint-border-radius';
+const ACTIVE_HINT_BORDER_WIDTH = 'active-hint-border-width';
+const ACTIVE_HINT_SHOW_ON_MAXIMIZED = 'active-hint-show-on-maximized';
 const STACKING_WITH_MOUSE = 'stacking-with-mouse';
 const COLUMN_SIZE = 'column-size';
 const EDGE_TILING = 'edge-tiling';
@@ -84,6 +86,14 @@ export class ExtensionSettings {
 
     active_hint_border_radius(): number {
         return this.ext.get_uint(ACTIVE_HINT_BORDER_RADIUS);
+    }
+
+    active_hint_border_width(): number {
+        return this.ext.get_uint(ACTIVE_HINT_BORDER_WIDTH);
+    }
+
+    active_hint_show_on_maximized(): boolean {
+        return this.ext.get_boolean(ACTIVE_HINT_SHOW_ON_MAXIMIZED);
     }
 
     stacking_with_mouse(): boolean {
@@ -186,6 +196,14 @@ export class ExtensionSettings {
 
     set_active_hint_border_radius(set: number) {
         this.ext.set_uint(ACTIVE_HINT_BORDER_RADIUS, set);
+    }
+
+    set_active_hint_border_width(set: number) {
+        this.ext.set_uint(ACTIVE_HINT_BORDER_WIDTH, set);
+    }
+
+    set_active_hint_show_on_maximized(set: boolean) {
+        this.ext.set_boolean(ACTIVE_HINT_SHOW_ON_MAXIMIZED, set);
     }
 
     set_stacking_with_mouse(set: boolean) {

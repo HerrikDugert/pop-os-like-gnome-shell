@@ -25,6 +25,8 @@ export class Indicator {
     toggle_titles: null | any;
     toggle_active: any;
     border_radius: any;
+    border_width: any;
+    toggle_maximized_hint: any;
 
     entry_gaps: any;
 
@@ -78,6 +80,26 @@ export class Indicator {
             },
         );
 
+        this.border_width = number_entry(
+            _('Active Border Width'),
+            {
+                value: ext.settings.active_hint_border_width(),
+                min: 1,
+                max: 10,
+            },
+            (value) => {
+                ext.settings.set_active_hint_border_width(value);
+            },
+        );
+
+        this.toggle_maximized_hint = toggle(
+            _('Show Active Hint on Maximized/Single'),
+            ext.settings.active_hint_show_on_maximized(),
+            (toggle: any) => {
+                ext.settings.set_active_hint_show_on_maximized(toggle.state);
+            },
+        );
+
         bm.addMenuItem(this.toggle_tiled);
         bm.addMenuItem(floating_window_exceptions(ext, bm));
 
@@ -92,6 +114,8 @@ export class Indicator {
 
         bm.addMenuItem(this.toggle_active);
         bm.addMenuItem(this.border_radius);
+        bm.addMenuItem(this.border_width);
+        bm.addMenuItem(this.toggle_maximized_hint);
 
         // CSS Selector
         bm.addMenuItem(color_selector(ext, bm));

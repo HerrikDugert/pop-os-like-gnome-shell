@@ -1,4 +1,5 @@
 // import * as Ecs from './ecs.js';
+import * as utils from './utils.js';
 import * as GrabOp from './grab_op.js';
 import * as Lib from './lib.js';
 import * as Log from './log.js';
@@ -758,7 +759,7 @@ export class Tiler {
             this.window = win.entity;
 
             if (win.is_maximized()) {
-                win.meta.unmaximize(Meta.MaximizeFlags.BOTH);
+                utils.unmaximize(win.meta);
             }
 
             // Set overlay to match window

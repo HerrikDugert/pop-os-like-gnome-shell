@@ -9,6 +9,14 @@ import Meta from 'gi://Meta';
 const { Ok, Err } = result;
 const { Error } = error;
 
+export function unmaximize(meta: Meta.Window): void {
+    if (meta.unmaximize.length === 0) {
+        meta.unmaximize();
+    } else {
+        meta.unmaximize(Meta.MaximizeFlags.BOTH);
+    }
+}
+
 export function is_wayland(): boolean {
     if (typeof Meta.is_wayland_compositor === 'function') {
         return Meta.is_wayland_compositor();

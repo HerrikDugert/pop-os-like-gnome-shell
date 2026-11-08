@@ -1359,25 +1359,30 @@ export class Ext extends Ecs.System<ExtEvent> {
                                 const r = (proxy as any).call_finish(res);
                                 const [serial, monitors, logical_monitors, properties] = r.deep_unpack();
 
+                                // monitors: [(identity_tuple, modes, props), ...]
+                                // identity_tuple: (connector, vendor, product, serial)
+
                                 let builtinConnector: string | null = null;
                                 for (const m of monitors) {
-                                    (globalThis as any).log('move_builtin_display: monitor ' + m[0] + ' props=' + JSON.stringify(m[5]));
-                                    if (m[5] && m[5]['is-builtin'] === true) {
-                                        builtinConnector = m[0];
+                                    const props = m[2];
+                                    const connector = m[0][0];
+                                    (globalThis as any).log('move_builtin_display: monitor ' + connector + ' is-builtin=' + (props ? props['is-builtin'] : 'n/a'));
+                                    if (props && props['is-builtin'] === true) {
+                                        builtinConnector = connector;
                                         break;
                                     }
                                 }
                                 if (!builtinConnector) {
                                     for (const m of monitors) {
-                                        const name = typeof m[0] === 'string' ? m[0].toLowerCase() : '';
-                                        if (name.startsWith('edp') || name.startsWith('dsi') || name.startsWith('lvds') || name.startsWith('lcd')) {
-                                            builtinConnector = m[0];
+                                        const connector = (m[0][0] || '').toLowerCase();
+                                        if (connector.startsWith('edp') || connector.startsWith('dsi') || connector.startsWith('lvds') || connector.startsWith('lcd')) {
+                                            builtinConnector = m[0][0];
                                             break;
                                         }
                                     }
                                 }
                                 if (!builtinConnector) {
-                                    (globalThis as any).print('move_builtin_display: no built-in display found');
+                                    (globalThis as any).log('move_builtin_display: no built-in display found');
                                     return;
                                 }
 
@@ -1385,7 +1390,7 @@ export class Ext extends Ecs.System<ExtEvent> {
                                 const builtinIdx = logical_monitors.findIndex((lm: any) => Array.isArray(lm[5]) && lm[5].some((m: any) => m[0] === builtinConnector));
 
                                 if (primaryIdx < 0 || builtinIdx < 0 || builtinIdx === primaryIdx) {
-                                    (globalThis as any).print('move_builtin_display: primary/built-in not found or is primary');
+                                    (globalThis as any).log('move_builtin_display: primary/built-in not found or is primary');
                                     return;
                                 }
 
@@ -1393,18 +1398,18 @@ export class Ext extends Ecs.System<ExtEvent> {
                                 const builtin = logical_monitors[builtinIdx];
 
                                 const currentMode = (monitorTuple: any) => {
-                                    const modes = monitorTuple[4];
+                                    const modes = monitorTuple[1];
                                     for (const mode of modes) {
                                         if (mode[6] && mode[6]['is-current']) return mode;
                                     }
                                     return modes[0];
                                 };
 
-                                const primaryMonitorTuple = monitors.find((m: any) => m[0] === primary[5][0][0]);
-                                const builtinMonitorTuple = monitors.find((m: any) => m[0] === builtinConnector);
+                                const primaryMonitorTuple = monitors.find((m: any) => m[0][0] === primary[5][0][0]);
+                                const builtinMonitorTuple = monitors.find((m: any) => m[0][0] === builtinConnector);
 
                                 if (!primaryMonitorTuple || !builtinMonitorTuple) {
-                                    (globalThis as any).print('move_builtin_display: monitor tuples not found');
+                                    (globalThis as any).log('move_builtin_display: monitor tuples not found');
                                     return;
                                 }
 
@@ -1439,7 +1444,7 @@ export class Ext extends Ecs.System<ExtEvent> {
 
                                     const monitors = monitorList.map((m: any) => {
                                         const connector = m[0];
-                                        const mon = monitors.find((mm: any) => mm[0] === connector);
+                                        const mon = monitors.find((mm: any) => mm[0][0] === connector);
                                         const mode = mon ? currentMode(mon) : null;
                                         const modeId = mode ? mode[0] : '';
                                         return [connector, modeId, {}];
@@ -1457,19 +1462,19 @@ export class Ext extends Ecs.System<ExtEvent> {
                                     (_p2: any, res2: any) => {
                                         try {
                                             (proxy as any).call_finish(res2);
-                                            (globalThis as any).print('move_builtin_display: moved ' + builtinConnector + ' ' + position);
+                                            (globalThis as any).log('move_builtin_display: moved ' + builtinConnector + ' ' + position);
                                         } catch (e) {
-                                            (globalThis as any).print('move_builtin_display: ApplyMonitorsConfig failed: ' + e);
+                                            (globalThis as any).log('move_builtin_display: ApplyMonitorsConfig failed: ' + e);
                                         }
                                     }
                                 );
                             } catch (e) {
-                                (globalThis as any).print('move_builtin_display: GetCurrentState failed: ' + e);
+                                (globalThis as any).log('move_builtin_display: GetCurrentState failed: ' + e);
                             }
                         }
                     );
                 } catch (e) {
-                    (globalThis as any).print('move_builtin_display: proxy creation failed: ' + e);
+                    (globalThis as any).log('move_builtin_display: proxy creation failed: ' + e);
                 }
             }
         );

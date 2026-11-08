@@ -1443,7 +1443,7 @@ export class Ext extends Ecs.System<ExtEvent> {
                                     const isPrimary = lm[4];
                                     const monitorList = lm[5];
 
-                                    const monitors = monitorList.map((m: any) => {
+                                    const monEntries = monitorList.map((m: any) => {
                                         const connector = m[0];
                                         const mon = monitors.find((mm: any) => mm[0][0] === connector);
                                         const mode = mon ? currentMode(mon) : null;
@@ -1451,7 +1451,7 @@ export class Ext extends Ecs.System<ExtEvent> {
                                         return [connector, modeId, {}];
                                     });
 
-                                    return [x, y, scale, transform, isPrimary, monitors];
+                                    return [x, y, scale, transform, isPrimary, monEntries];
                                 });
 
                                 proxy.call(

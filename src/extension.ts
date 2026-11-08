@@ -1357,17 +1357,13 @@ export class Ext extends Ecs.System<ExtEvent> {
                         (_p: any, res: any) => {
                             try {
                                 const r = (proxy as any).call_finish(res);
-                                const [_serial, monitors, logical_monitors] = r.deep_unpack();
-
-                                // monitors: [(identity_tuple, modes, props), ...]
-                                // identity_tuple: (connector, vendor, product, serial)
+                                const [serial, monitors, logical_monitors, properties] = r.deep_unpack();
 
                                 let builtinConnector: string | null = null;
                                 for (const m of monitors) {
                                     const props = m[2];
                                     const connector = m[0][0];
                                     const isBuiltin = props ? (props['is-builtin'] === true || (typeof props['is-builtin']?.unpack === 'function' && props['is-builtin'].unpack() === true)) : false;
-                                    (globalThis as any).log('move_builtin_display: monitor ' + connector + ' is-builtin=' + isBuiltin);
                                     if (isBuiltin) {
                                         builtinConnector = connector;
                                         break;
@@ -1396,16 +1392,79 @@ export class Ext extends Ecs.System<ExtEvent> {
                                 }
 
                                 const primary = logical_monitors[primaryIdx];
-                                // const builtin = logical_monitors[builtinIdx];
+                                const builtin = logical_monitors[builtinIdx];
 
-                                const primaryConnector = primary[5][0][0];
+                                const currentMode = (monitorTuple: any) => {
+                                    const modes = monitorTuple[1];
+                                    for (const mode of modes) {
+                                        if (mode[6] && mode[6]['is-current']) return mode;
+                                    }
+                                    return modes[0];
+                                };
 
-                                // Use gdctl to apply the layout; it handles the
-                                // confirmation dialog internally.
-                                const gdctlCmd = 'gdctl set -P --logical-monitor -M ' + builtinConnector + ' ' + (position === 'below' ? '--below' : '--right-of') + ' ' + primaryConnector;
-                                (globalThis as any).log('move_builtin_display: running ' + gdctlCmd);
-                                (globalThis as any).log('move_builtin_display: launching gdctl async');
-                                GLib.spawn_command_line_async(gdctlCmd);
+                                const primaryMonitorTuple = monitors.find((m: any) => m[0][0] === primary[5][0][0]);
+                                const builtinMonitorTuple = monitors.find((m: any) => m[0][0] === builtinConnector);
+
+                                if (!primaryMonitorTuple || !builtinMonitorTuple) {
+                                    (globalThis as any).log('move_builtin_display: monitor tuples not found');
+                                    return;
+                                }
+
+                                const primaryMode = currentMode(primaryMonitorTuple);
+                                const primaryScale = primary[2];
+                                const primaryWidth = primaryMode[1] / primaryScale;
+                                const primaryHeight = primaryMode[2] / primaryScale;
+
+                                let newX = builtin[0];
+                                let newY = builtin[1];
+
+                                if (position === 'below') {
+                                    newX = primary[0];
+                                    newY = primary[1] + primaryHeight;
+                                } else {
+                                    newX = primary[0] + primaryWidth;
+                                    newY = primary[1];
+                                }
+
+                                const configs = logical_monitors.map((lm: any, idx: number) => {
+                                    let x = lm[0];
+                                    let y = lm[1];
+                                    if (idx === builtinIdx) {
+                                        x = newX;
+                                        y = newY;
+                                    }
+
+                                    const scale = lm[2];
+                                    const transform = lm[3];
+                                    const isPrimary = lm[4];
+                                    const monitorList = lm[5];
+
+                                    const monEntries = monitorList.map((m: any) => {
+                                        const connector = m[0];
+                                        const mon = monitors.find((mm: any) => mm[0][0] === connector);
+                                        const mode = mon ? currentMode(mon) : null;
+                                        const modeId = mode ? mode[0] : '';
+                                        return [connector, modeId, {}];
+                                    });
+
+                                    return [x, y, scale, transform, isPrimary, monEntries];
+                                });
+
+                                proxy.call(
+                                    'ApplyMonitorsConfig',
+                                    new (GLib as any).Variant('(uua(iiduba(ssa{sv}))a{sv})', [serial, 2, configs, properties]),
+                                    Gio.DBusCallFlags.NONE,
+                                    -1,
+                                    null,
+                                    (_p2: any, res2: any) => {
+                                        try {
+                                            (proxy as any).call_finish(res2);
+                                            (globalThis as any).log('move_builtin_display: moved ' + builtinConnector + ' ' + position);
+                                        } catch (e) {
+                                            (globalThis as any).log('move_builtin_display: ApplyMonitorsConfig failed: ' + e);
+                                        }
+                                    }
+                                );
                             } catch (e) {
                                 (globalThis as any).log('move_builtin_display: GetCurrentState failed: ' + e);
                             }
@@ -2876,15 +2935,6 @@ export default class PopShellExtension extends Extension {
 
         ext.keybindings.enable(ext.keybindings.global).enable(ext.keybindings.window_focus);
 
-        // Suppress GNOME's "Keep these display settings?" confirmation dialog
-        // when monitor layouts are changed programmatically (e.g. via the
-        // built-in display move buttons).
-        if (typeof Main.wm._confirmDisplayChange === 'function' && !Main.wm._popShellConfirmDisplayChangeOverridden) {
-            Main.wm._popShellOriginalConfirmDisplayChange = Main.wm._confirmDisplayChange;
-            Main.wm._confirmDisplayChange = () => {};
-            Main.wm._popShellConfirmDisplayChangeOverridden = true;
-        }
-
         if (ext.settings.tile_by_default()) {
             ext.auto_tile_on();
         }
@@ -2905,12 +2955,6 @@ export default class PopShellExtension extends Extension {
             ext.stop_launcher_services();
             ext.hide_all_borders();
             ext.window_search.remove_injections();
-
-            if (Main.wm._popShellConfirmDisplayChangeOverridden) {
-                Main.wm._confirmDisplayChange = Main.wm._popShellOriginalConfirmDisplayChange;
-                delete Main.wm._popShellOriginalConfirmDisplayChange;
-                delete Main.wm._popShellConfirmDisplayChangeOverridden;
-            }
 
             layoutManager.removeChrome(ext.overlay);
 

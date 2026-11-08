@@ -2876,6 +2876,15 @@ export default class PopShellExtension extends Extension {
 
         ext.keybindings.enable(ext.keybindings.global).enable(ext.keybindings.window_focus);
 
+        // Suppress GNOME's "Keep these display settings?" confirmation dialog
+        // when monitor layouts are changed programmatically (e.g. via the
+        // built-in display move buttons).
+        if (typeof Main.wm._confirmDisplayChange === 'function' && !Main.wm._popShellConfirmDisplayChangeOverridden) {
+            Main.wm._popShellOriginalConfirmDisplayChange = Main.wm._confirmDisplayChange;
+            Main.wm._confirmDisplayChange = () => {};
+            Main.wm._popShellConfirmDisplayChangeOverridden = true;
+        }
+
         if (ext.settings.tile_by_default()) {
             ext.auto_tile_on();
         }
@@ -2896,6 +2905,12 @@ export default class PopShellExtension extends Extension {
             ext.stop_launcher_services();
             ext.hide_all_borders();
             ext.window_search.remove_injections();
+
+            if (Main.wm._popShellConfirmDisplayChangeOverridden) {
+                Main.wm._confirmDisplayChange = Main.wm._popShellOriginalConfirmDisplayChange;
+                delete Main.wm._popShellOriginalConfirmDisplayChange;
+                delete Main.wm._popShellConfirmDisplayChangeOverridden;
+            }
 
             layoutManager.removeChrome(ext.overlay);
 

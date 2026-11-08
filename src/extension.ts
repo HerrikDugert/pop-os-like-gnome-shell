@@ -1366,8 +1366,9 @@ export class Ext extends Ecs.System<ExtEvent> {
                                 for (const m of monitors) {
                                     const props = m[2];
                                     const connector = m[0][0];
-                                    (globalThis as any).log('move_builtin_display: monitor ' + connector + ' is-builtin=' + (props ? props['is-builtin'] : 'n/a'));
-                                    if (props && props['is-builtin'] === true) {
+                                    const isBuiltin = props ? (props['is-builtin'] === true || (typeof props['is-builtin']?.unpack === 'function' && props['is-builtin'].unpack() === true)) : false;
+                                    (globalThis as any).log('move_builtin_display: monitor ' + connector + ' is-builtin=' + isBuiltin);
+                                    if (isBuiltin) {
                                         builtinConnector = connector;
                                         break;
                                     }

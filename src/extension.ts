@@ -1404,8 +1404,8 @@ export class Ext extends Ecs.System<ExtEvent> {
                                 // confirmation dialog internally.
                                 const gdctlCmd = 'gdctl set -P --logical-monitor -M ' + builtinConnector + ' ' + (position === 'below' ? '--below' : '--right-of') + ' ' + primaryConnector;
                                 (globalThis as any).log('move_builtin_display: running ' + gdctlCmd);
-                                const [ok, , , status] = GLib.spawn_command_line_sync(gdctlCmd);
-                                (globalThis as any).log('move_builtin_display: gdctl ok=' + ok + ' status=' + status);
+                                const [ok, , stderr, status] = GLib.spawn_command_line_sync(gdctlCmd);
+                                (globalThis as any).log('move_builtin_display: gdctl ok=' + ok + ' status=' + status + ' stderr=' + (stderr ? imports.byteArray.toString(stderr) : ''));
                                 if (ok && status === 0) {
                                     (globalThis as any).log('move_builtin_display: moved ' + builtinConnector + ' ' + position + ' primary display');
                                 } else {

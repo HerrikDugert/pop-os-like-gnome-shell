@@ -54,7 +54,6 @@ try {
 }
 const { GlobalEvent, WindowEvent } = Events;
 const { cursor_rect, is_keyboard_op, is_resize_op, is_move_op } = Lib;
-import { spawn } from 'resource:///org/gnome/shell/misc/util.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 const {
     layoutManager,
@@ -1403,16 +1402,15 @@ export class Ext extends Ecs.System<ExtEvent> {
 
                                 // Use gdctl to apply the layout; it handles the
                                 // confirmation dialog internally.
-                                const gdctlArgs = [
-                                    'gdctl', 'set', '-P',
-                                    '--logical-monitor', '-M', builtinConnector,
-                                    position === 'below' ? '--below' : '--right-of',
-                                    primaryConnector,
-                                ];
-                                (globalThis as any).log('move_builtin_display: running ' + gdctlArgs.join(' '));
-                                spawn(gdctlArgs);
-
-                                (globalThis as any).log('move_builtin_display: moved ' + builtinConnector + ' ' + position + ' primary display');
+                                const gdctlCmd = 'gdctl set -P --logical-monitor -M ' + builtinConnector + ' ' + (position === 'below' ? '--below' : '--right-of') + ' ' + primaryConnector;
+                                (globalThis as any).log('move_builtin_display: running ' + gdctlCmd);
+                                const [ok, stdout, stderr, status] = GLib.spawn_command_line_sync(gdctlCmd);
+                                (globalThis as any).log('move_builtin_display: gdctl ok=' + ok + ' status=' + status + ' stderr=' + (stderr ? stderr.toString() : '') + ' stdout=' + (stdout ? stdout.toString() : ''));
+                                if (ok && status === 0) {
+                                    (globalThis as any).log('move_builtin_display: moved ' + builtinConnector + ' ' + position + ' primary display');
+                                } else {
+                                    (globalThis as any).log('move_builtin_display: gdctl failed');
+                                }
                             } catch (e) {
                                 (globalThis as any).log('move_builtin_display: GetCurrentState failed: ' + e);
                             }

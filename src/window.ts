@@ -320,6 +320,18 @@ export class ShellWindow {
             // Quake-style terminals such as Tilix's quake mode.
             if (role === 'quake') return false;
 
+            // Exclude oversized windows whose minimum size leaves insufficient space
+            // for neighbouring windows (e.g. Steam, Winboat at certain scalings).
+            const [min_known, min_width, min_height] = (this.meta as any).get_min_size();
+            if (min_known) {
+                const oversized_w = ext.settings.oversized_window_width();
+                const oversized_h = ext.settings.oversized_window_height();
+                const is_oversized =
+                    (oversized_w > 0 && min_width > oversized_w) ||
+                    (oversized_h > 0 && min_height > oversized_h);
+                if (is_oversized) return false;
+            }
+
             // Steam loading window is less than 400px wide and 200px tall
             if (this.meta.get_title() === 'Steam') {
                 const rect = this.rect();

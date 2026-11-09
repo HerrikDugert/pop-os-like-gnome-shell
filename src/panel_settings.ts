@@ -27,6 +27,9 @@ export class Indicator {
     border_radius: any;
     border_width: any;
     toggle_maximized_hint: any;
+    oversized_width: any;
+    oversized_height: any;
+    toggle_untile_reset: any;
 
     entry_gaps: any;
 
@@ -100,6 +103,38 @@ export class Indicator {
             },
         );
 
+        this.oversized_width = number_entry(
+            _('Oversized Window Width'),
+            {
+                value: ext.settings.oversized_window_width(),
+                min: 0,
+                max: 4096,
+            },
+            (value) => {
+                ext.settings.set_oversized_window_width(value);
+            },
+        );
+
+        this.oversized_height = number_entry(
+            _('Oversized Window Height'),
+            {
+                value: ext.settings.oversized_window_height(),
+                min: 0,
+                max: 4096,
+            },
+            (value) => {
+                ext.settings.set_oversized_window_height(value);
+            },
+        );
+
+        this.toggle_untile_reset = toggle(
+            _('Reset Windows on Untile'),
+            ext.settings.untile_reset_windows(),
+            (toggle: any) => {
+                ext.settings.set_untile_reset_windows(toggle.state);
+            },
+        );
+
         bm.addMenuItem(this.toggle_tiled);
         bm.addMenuItem(floating_window_exceptions(ext, bm));
 
@@ -131,6 +166,9 @@ export class Indicator {
         bm.addMenuItem(this.border_radius);
         bm.addMenuItem(this.border_width);
         bm.addMenuItem(this.toggle_maximized_hint);
+        bm.addMenuItem(this.oversized_width);
+        bm.addMenuItem(this.oversized_height);
+        bm.addMenuItem(this.toggle_untile_reset);
 
         // CSS Selector
         bm.addMenuItem(color_selector(ext, bm));

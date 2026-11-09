@@ -8,6 +8,8 @@ Therefore, we see an opportunity here to advance the usability of the GNOME desk
 
 [![](./screenshot.webp)](https://raw.githubusercontent.com/pop-os/shell/master/screenshot.webp)
 
+> **Note:** This repository is a fork of [pop-os/shell](https://github.com/pop-os/shell.git) with GNOME Shell 51 / Fedora 45 support and additional customizations (COSMIC-aligned shortcuts, active hint controls, built-in display movement, etc.).
+
 ---
 
 ## Table of Contents

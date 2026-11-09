@@ -1,6 +1,6 @@
 import * as lib from './lib.js';
 
-import GLib from 'gi://GLib';
+import Gio from 'gi://Gio';
 import { spawn } from 'resource:///org/gnome/shell/misc/util.js';
 
 export var MOTIF_HINTS: string = '_MOTIF_WM_HINTS';
@@ -92,6 +92,7 @@ export function motif_hints(xid: string): Array<string> | null {
 }
 
 export function set_hint(xid: string, hint: string, value: string[]) {
+    if (!/^0x[0-9a-f]+$/i.test(xid)) return;
     spawn(['xprop', '-id', xid, '-f', hint, '32c', '-set', hint, value.join(', ')]);
 }
 
@@ -121,8 +122,19 @@ function parse_string(string: string): string | null {
 }
 
 function xprop_cmd(xid: string, args: string): string | null {
-    let xprops = GLib.spawn_command_line_sync(`xprop -id ${xid} ${args}`);
-    if (!xprops[0]) return null;
+    // Window IDs are always hexadecimal; reject anything else so it can never
+    // be interpreted as an extra command-line argument.
+    if (!/^0x[0-9a-f]+$/i.test(xid)) return null;
 
-    return imports.byteArray.toString(xprops[1]);
+    try {
+        const proc = Gio.Subprocess.new(
+            ['xprop', '-id', xid, args],
+            Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE,
+        );
+        const [, stdout] = proc.communicate_utf8(null, null);
+        return stdout;
+    } catch (why) {
+        lib.dbg(`xprop failed: ${why}`);
+        return null;
+    }
 }

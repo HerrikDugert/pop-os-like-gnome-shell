@@ -22,6 +22,31 @@ interface Error {
 
 type Result<T> = Ok<T> | Error;
 
+/** Compiled regex cache so window focus checks do not recompile rules every time. */
+const REGEX_CACHE: Map<string, RegExp | null> = new Map();
+
+function compile_regex(source: string): RegExp | null {
+    if (REGEX_CACHE.has(source)) return REGEX_CACHE.get(source) ?? null;
+
+    let regex: RegExp | null = null;
+    try {
+        regex = new RegExp(source, 'i');
+    } catch (why) {
+        log(`pop-shell: invalid window rule pattern "${source}": ${why}`);
+    }
+
+    REGEX_CACHE.set(source, regex);
+    return regex;
+}
+
+function valid_rule(value: any): value is FloatRule {
+    if (value === null || typeof value !== 'object') return false;
+    if (value.class !== undefined && typeof value.class !== 'string') return false;
+    if (value.title !== undefined && typeof value.title !== 'string') return false;
+    if (value.disabled !== undefined && typeof value.disabled !== 'boolean') return false;
+    return true;
+}
+
 export const DEFAULT_FLOAT_RULES: Array<FloatRule> = [
     { class: 'Authy Desktop' },
     { class: 'Com.github.amezin.ddterm' },
@@ -120,13 +145,15 @@ export class Config {
     window_shall_float(wclass: string, title: string): boolean {
         for (const rule of this.float.concat(DEFAULT_FLOAT_RULES)) {
             if (rule.class) {
-                if (!new RegExp(rule.class, 'i').test(wclass)) {
+                const regex = compile_regex(rule.class);
+                if (!regex || !regex.test(wclass)) {
                     continue;
                 }
             }
 
             if (rule.title) {
-                if (!new RegExp(rule.title, 'i').test(title)) {
+                const regex = compile_regex(rule.title);
+                if (!regex || !regex.test(title)) {
                     continue;
                 }
             }
@@ -145,13 +172,15 @@ export class Config {
 
         for (const rule of this.skiptaskbarhidden.concat(SKIPTASKBAR_EXCEPTIONS)) {
             if (rule.class) {
-                if (!new RegExp(rule.class, 'i').test(wmclass)) {
+                const regex = compile_regex(rule.class);
+                if (!regex || !regex.test(wmclass)) {
                     continue;
                 }
             }
 
             if (rule.title) {
-                if (!new RegExp(rule.title, 'i').test(wmtitle)) {
+                const regex = compile_regex(rule.title);
+                if (!regex || !regex.test(wmtitle)) {
                     continue;
                 }
             }
@@ -163,6 +192,7 @@ export class Config {
     }
 
     reload() {
+        REGEX_CACHE.clear();
         const conf = Config.from_config();
 
         if (conf.tag === 0) {
@@ -234,11 +264,28 @@ export class Config {
     }
 
     static from_json(json: string): Config {
+        const config = new Config();
+
         try {
-            return JSON.parse(json);
-        } catch (error) {
-            return new Config();
+            const data = JSON.parse(json);
+            if (data === null || typeof data !== 'object') return config;
+
+            if (Array.isArray(data.float)) {
+                config.float = data.float.filter(valid_rule);
+            }
+
+            if (Array.isArray(data.skiptaskbarhidden)) {
+                config.skiptaskbarhidden = data.skiptaskbarhidden.filter(valid_rule);
+            }
+
+            if (typeof data.log_on_focus === 'boolean') {
+                config.log_on_focus = data.log_on_focus;
+            }
+        } catch (why) {
+            log(`pop-shell: failed to parse config: ${why}`);
         }
+
+        return config;
     }
 
     private static from_config(): Result<Config> {

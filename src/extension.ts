@@ -250,18 +250,6 @@ export class Ext extends Ecs.System<ExtEvent> {
 
         this.conf.reload();
 
-        if (this.settings.int) {
-            this.settings.int.connect('changed::gtk-theme', () => {
-                this.register(Events.global(GlobalEvent.GtkThemeChanged));
-            });
-        }
-
-        if (this.settings.shell) {
-            this.settings.shell.connect('changed::name', () => {
-                this.register(Events.global(GlobalEvent.GtkShellChanged));
-            });
-        }
-
         this.dbus.FocusUp = () => this.focus_up();
         this.dbus.FocusDown = () => this.focus_down();
         this.dbus.FocusLeft = () => this.focus_left();
@@ -2059,6 +2047,18 @@ export class Ext extends Ecs.System<ExtEvent> {
             return true;
         });
 
+        if (this.settings.int) {
+            this.connect(this.settings.int, 'changed::gtk-theme', () => {
+                this.register(Events.global(GlobalEvent.GtkThemeChanged));
+            });
+        }
+
+        if (this.settings.shell) {
+            this.connect(this.settings.shell, 'changed::name', () => {
+                this.register(Events.global(GlobalEvent.GtkShellChanged));
+            });
+        }
+
         const workspace_manager = wom;
 
         for (const [, ws] of iter_workspaces(workspace_manager)) {
@@ -2096,6 +2096,12 @@ export class Ext extends Ecs.System<ExtEvent> {
                     if (indicator) indicator.toggle_active.setToggleState(this.settings.active_hint());
 
                     this.show_border_on_focused();
+                    break;
+                case 'active-hint-border-radius':
+                case 'active-hint-border-width':
+                case 'active-hint-show-on-maximized':
+                    this.show_border_on_focused();
+                    break;
                 case 'gap-inner':
                     this.on_gap_inner();
                     break;
@@ -2278,7 +2284,7 @@ export class Ext extends Ecs.System<ExtEvent> {
             this.prev_focused = [null, null];
         });
 
-        St.ThemeContext.get_for_stage(global.stage).connect('notify::scale-factor', () => this.update_scale());
+        this.connect(St.ThemeContext.get_for_stage(global.stage), 'notify::scale-factor', () => this.update_scale());
 
         // Modes
 
@@ -2899,6 +2905,8 @@ export default class PopShellExtension extends Extension {
             });
         }
 
+        ext.dbus.start();
+
         if (ext.settings.show_skiptaskbar()) {
             _show_skip_taskbar_windows(ext);
         } else {
@@ -2940,6 +2948,7 @@ export default class PopShellExtension extends Extension {
             delete globalThis.popShellExtension;
             ext.injections_remove();
             ext.signals_remove();
+            ext.dbus.destroy();
             ext.exit_modes();
             ext.hide_all_borders();
 

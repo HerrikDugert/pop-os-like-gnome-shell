@@ -77,25 +77,22 @@ export function leftward_distance(win_a: Meta.Window, win_b: Meta.Window) {
     return directional_distance(win_a.get_frame_rect(), win_b.get_frame_rect(), east, west);
 }
 
-export function nearest_side(ext: Ext, origin: [number, number], rect: Rectangular): [number, Side] {
+export function nearest_side(_ext: Ext, origin: [number, number], rect: Rectangular): [number, Side] {
     const left = west(rect),
         top = north(rect),
         right = east(rect),
-        bottom = south(rect),
-        ctr = center(rect);
+        bottom = south(rect);
 
     const left_distance = distance(origin, left),
         top_distance = distance(origin, top),
         right_distance = distance(origin, right),
-        bottom_distance = distance(origin, bottom),
-        center_distance = distance(origin, ctr);
+        bottom_distance = distance(origin, bottom);
 
     let nearest: [number, Side] =
         left_distance < right_distance ? [left_distance, Side.LEFT] : [right_distance, Side.RIGHT];
 
     if (top_distance < nearest[0]) nearest = [top_distance, Side.TOP];
     if (bottom_distance < nearest[0]) nearest = [bottom_distance, Side.BOTTOM];
-    if (ext.settings.stacking_with_mouse() && center_distance < nearest[0]) nearest = [center_distance, Side.CENTER];
 
     return nearest;
 }

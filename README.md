@@ -137,13 +137,13 @@ On multi-monitor setups, the built-in display (e.g. laptop panel) can be quickly
 - **Move Built-in Display Below Primary** – places the built-in display under the primary display
 - **Move Built-in Display Right of Primary** – places it to the right of the primary display
 
-The change is applied persistently via `gdctl` (GNOME Display Control).
+The change is applied persistently via the Mutter `org.gnome.Mutter.DisplayConfig` D-Bus API. GNOME may ask you to confirm the new display layout.
 
 ---
 
 ## Shared Features
 
-Features that are shared between stacking and auto-tiling modes.
+Features that are shared between floating and auto-tiling modes.
 
 ### Directional Keys
 
@@ -191,7 +191,7 @@ This is the default mode of Pop Shell, which combines traditional stacking windo
 
 ## Tiling Mode
 
-Disabled by default, this mode manages windows using a tree-based tiling window manager. Similar to i3, each node of the tree represents two branches. A branch may be a window, a fork containing more branches, or a stack that contains many windows.
+Disabled by default, this mode manages windows using a tree-based tiling window manager. Similar to i3, each node of the tree represents two branches. A branch may be a window or a fork containing more branches.
 
 ### Keyboard Shortcuts
 

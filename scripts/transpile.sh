@@ -15,6 +15,7 @@ transpile() {
 }
 
 rm -rf _build
+rm -rf target tsconfig.tsbuildinfo
 
 glib-compile-schemas schemas &
 

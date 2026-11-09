@@ -8,12 +8,8 @@ endif
 
 ifeq ($(strip $(DESTDIR)),)
 INSTALLBASE = $(XDG_DATA_HOME)/gnome-shell/extensions
-PLUGIN_BASE = $(XDG_DATA_HOME)/pop-shell/launcher
-SCRIPTS_BASE = $(XDG_DATA_HOME)/pop-shell/scripts
 else
 INSTALLBASE = $(DESTDIR)/usr/share/gnome-shell/extensions
-PLUGIN_BASE = $(DESTDIR)/usr/lib/pop-shell/launcher
-SCRIPTS_BASE = $(DESTDIR)/usr/lib/pop-shell/scripts
 endif
 INSTALLNAME = $(UUID)
 
@@ -61,7 +57,7 @@ local-install: depcheck compile install configure restart-shell enable
 
 install:
 	rm -rf $(INSTALLBASE)/$(INSTALLNAME)
-	mkdir -p $(INSTALLBASE)/$(INSTALLNAME) $(PLUGIN_BASE) $(SCRIPTS_BASE)
+	mkdir -p $(INSTALLBASE)/$(INSTALLNAME)
 	cp -r _build/* $(INSTALLBASE)/$(INSTALLNAME)/
 
 uninstall:

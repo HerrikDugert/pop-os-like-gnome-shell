@@ -399,9 +399,13 @@ function color_selector(ext: Ext, menu: any) {
 
     color_selector_item.add_child(color_button);
     color_button.connect('button-press-event', () => {
-        let path = get_current_path() + '/color_dialog/main.js';
-        let resp = GLib.spawn_command_line_async(`gjs --module ${path}`);
-        if (!resp) {
+        const path = get_current_path() + '/color_dialog/main.js';
+        try {
+            // Pass the path as a separate argument instead of interpolating it
+            // into a command line, which would break on paths with spaces.
+            Gio.Subprocess.new(['gjs', '--module', path], Gio.SubprocessFlags.NONE);
+        } catch (why) {
+            (globalThis as any).log(`pop-shell: failed to launch color dialog: ${why}`);
             return null;
         }
 

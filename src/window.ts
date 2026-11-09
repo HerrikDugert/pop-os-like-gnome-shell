@@ -457,12 +457,15 @@ export class ShellWindow {
         if (this.ext.settings.active_hint()) {
             let border = this.border;
 
+            const sameMonitorCount = this.ext.active_window_list().filter((w) => !w.meta.minimized && w.meta.get_monitor() === this.meta.get_monitor()).length;
+
             const permitted = () => {
                 return (
                     this.actor_exists() &&
                     this.ext.focus_window() == this &&
                     !this.meta.is_fullscreen() &&
-                    (this.ext.active_window_list().filter((w) => !w.meta.minimized).length > 1 ||
+                    (sameMonitorCount > 1 ||
+                    this.is_snap_edge() ||
                     this.ext.settings.active_hint_show_on_maximized()) &&
                     !this.meta.minimized
                 );
@@ -509,11 +512,13 @@ export class ShellWindow {
      */
     restack(updateState: RESTACK_STATE = RESTACK_STATE.NORMAL) {
         this.update_border_layout();
+        const sameMonitorCount = this.ext.active_window_list().filter((w) => !w.meta.minimized && w.meta.get_monitor() === this.meta.get_monitor()).length;
         if (
             this.meta.is_fullscreen() ||
             this.meta.minimized ||
-            (this.ext.active_window_list().filter((w) => !w.meta.minimized).length < 2 &&
-                !this.ext.settings.active_hint_show_on_maximized())
+            (!this.is_snap_edge() &&
+                !this.ext.settings.active_hint_show_on_maximized() &&
+                sameMonitorCount <= 1)
         ) {
             this.hide_border();
         }

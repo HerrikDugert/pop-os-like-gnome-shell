@@ -237,7 +237,6 @@ function shortcuts(): any {
         [_('Move Windows'), _('Super + Shift + Arrow Keys')],
         [_('Toggle Tiling'), _('Super + Y')],
         [_('Toggle Floating'), _('Super + G')],
-        [_('Toggle Stacking'), _('Super + S')],
         [_('Change Orientation'), _('Super + O')],
         [_('Launch Terminal'), _('Super + Enter')],
         [_('Launch Files'), _('Super + F')],

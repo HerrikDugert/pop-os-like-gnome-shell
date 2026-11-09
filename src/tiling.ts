@@ -57,7 +57,6 @@ export class Tiler {
             'tile-swap-right': () => this.swap_right(ext),
             'tile-accept': () => this.accept(ext),
             'tile-reject': () => this.exit(ext),
-            'toggle-stacking': () => this.toggle_stacking(ext),
         };
     }
 

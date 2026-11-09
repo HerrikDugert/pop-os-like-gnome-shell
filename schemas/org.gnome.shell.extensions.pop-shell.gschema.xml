@@ -80,6 +80,11 @@
             <summary>Snaps windows to the tiling grid on drop</summary>
         </key>
 
+        <key type="b" name="tile-by-default">
+            <default>false</default>
+            <summary>Tile launched windows by default</summary>
+        </key>
+
         <key type="b" name="untile-reset-windows">
             <default>true</default>
             <summary>Reset windows to their previous position if tiling is disabled.</summary>

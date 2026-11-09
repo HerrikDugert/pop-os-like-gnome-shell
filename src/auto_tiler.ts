@@ -517,8 +517,6 @@ export class AutoTiler {
             this.tile(ext, fork, fork.area);
             return true;
         } else {
-            if (attach_to.stack === null) this.create_stack(ext, attach_to);
-
             placement = { auto: 0 };
         }
 
@@ -587,24 +585,8 @@ export class AutoTiler {
         }
     }
 
-    toggle_stacking(ext: Ext, window?: ShellWindow) {
-        const focused = window ?? ext.focus_window();
-        if (!focused) return;
-
-        // Disable floating if floating is enabled
-        if (ext.contains_tag(focused.entity, Tags.Floating)) {
-            ext.delete_tag(focused.entity, Tags.Floating);
-            this.auto_tile(ext, focused, false);
-        }
-
-        const fork_entity = this.attached.get(focused.entity);
-
-        if (fork_entity) {
-            const fork = this.forest.forks.get(fork_entity);
-            if (fork) {
-                this.unstack(ext, fork, focused, true);
-            }
-        }
+    toggle_stacking(_ext: Ext, _window?: ShellWindow) {
+        // Stacking is disabled in this build.
     }
 
     unstack(ext: Ext, fork: Fork, win: ShellWindow, toggled: boolean = false) {
@@ -661,18 +643,8 @@ export class AutoTiler {
     }
 
     /** Convers a window into a stack if it was not already stacked */
-    create_stack(ext: Ext, window: ShellWindow) {
-        const entity = this.attached.get(window.entity);
-        if (!entity) return;
-
-        const fork = this.forest.forks.get(entity);
-        if (!fork) return;
-
-        if (fork.left.is_window(window.entity)) {
-            this.stack_left(ext, fork, window);
-        } else if (fork.right?.is_window(window.entity)) {
-            this.stack_right(ext, fork, window);
-        }
+    create_stack(_ext: Ext, _window: ShellWindow) {
+        // Stacking is disabled in this build.
     }
 
     update_stack(ext: Ext, stack: node.NodeStack) {

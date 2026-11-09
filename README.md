@@ -110,7 +110,6 @@ Pop Shell follows the [Pop!\_OS COSMIC keyboard shortcuts](https://system76.com/
 | `Super` + `O` | Toggle the orientation of a fork's tiling orientation |
 | `Super` + `G` | Toggle a window between floating and tiling |
 | `Super` + `Y` | Toggle auto-tiling |
-| `Super` + `S` | Toggle stacking mode |
 | `Super` + `Return` | Launch a new terminal window |
 | `Super` + `Shift` + `Return` | Enter window management mode |
 | `Super` + `F` | Launch a new Files window |

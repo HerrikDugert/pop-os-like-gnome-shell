@@ -138,11 +138,6 @@
         </key>
 
         <!-- Launcher -->
-        <key type="as" name="activate-launcher">
-            <default><![CDATA[['<Super>slash']]]></default>
-            <summary>Search key combo</summary>
-        </key>
-
         <key type="as" name="launch-terminal">
             <default><![CDATA[['<Super>Return','<Super>t','<Super>KP_Enter']]]></default>
             <summary>Launch a new terminal window</summary>

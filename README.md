@@ -114,7 +114,6 @@ Pop Shell follows the [Pop!\_OS COSMIC keyboard shortcuts](https://system76.com/
 | `Super` + `Return` | Launch a new terminal window |
 | `Super` + `Shift` + `Return` | Enter window management mode |
 | `Super` + `F` | Launch a new Files window |
-| `Super` + `/` | Open the launcher |
 | `Super` + `Q` | Close window |
 | `Super` + `M` | Maximize window |
 
@@ -174,10 +173,6 @@ Activating this enables the following behaviors:
 - `O` – toggle tiling orientation
 - `Return` – apply changes
 - `Esc` – cancel changes
-
-### Launcher
-
-Pop Shell provides an integrated launcher which interfaces directly with our [pop-launcher](https://github.com/pop-os/launcher) service.
 
 ### Inner and Outer Gaps
 

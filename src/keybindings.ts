@@ -14,7 +14,6 @@ export class Keybindings {
     constructor(ext: Ext) {
         this.ext = ext;
         this.global = {
-            'activate-launcher': () => ext.window_search.open(ext),
             'launch-terminal': () => spawn(['ptyxis', '--new-window']),
             'launch-files': () => spawn(['nautilus', '--new-window']),
         };

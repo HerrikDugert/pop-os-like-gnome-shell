@@ -431,6 +431,18 @@ export class Ext extends Ecs.System<ExtEvent> {
         }
     }
 
+    allows_window_io(): boolean {
+        return this.events_enabled;
+    }
+
+    refresh_window_decorations() {
+        for (const window of this.windows.values()) window.update_decoration(this);
+    }
+
+    stop_window_io() {
+        for (const window of this.windows.values()) window.cancel_decoration();
+    }
+
     // Extension methods
 
     activate_window(window: Window.ShellWindow | null) {
@@ -853,6 +865,7 @@ export class Ext extends Ecs.System<ExtEvent> {
         const stack = window.stack;
 
         window.destroying = true;
+        window.cancel_decoration();
 
         // Disconnect all signals on this window
         this.window_signals.take_with(win, (signals) => {
@@ -1879,20 +1892,8 @@ export class Ext extends Ecs.System<ExtEvent> {
 
     on_show_window_titles() {
         const show_title = this.settings.show_title();
-
-        if (indicator) {
-            indicator.toggle_titles.setToggleState(show_title);
-        }
-
-        for (const window of this.windows.values()) {
-            if (window.is_client_decorated()) continue;
-
-            if (show_title) {
-                window.decoration_show(this);
-            } else {
-                window.decoration_hide(this);
-            }
-        }
+        if (indicator?.toggle_titles) indicator.toggle_titles.setToggleState(show_title);
+        this.refresh_window_decorations();
     }
 
     on_smart_gap() {
@@ -2812,6 +2813,7 @@ export class Ext extends Ecs.System<ExtEvent> {
             let win = new Window.ShellWindow(entity, meta, window_app, this);
 
             this.windows.insert(entity, win);
+            win.update_decoration(this);
             this.monitors.insert(entity, [win.meta.get_monitor(), win.workspace_id()]);
 
             const grab_focus = () => {
@@ -2956,6 +2958,7 @@ export default class PopShellExtension extends Extension {
 
         ext.injections_add();
         ext.signals_attach();
+        ext.refresh_window_decorations();
 
         disable_window_attention_handler();
 
@@ -2983,6 +2986,7 @@ export default class PopShellExtension extends Extension {
 
             ext.stop_events();
             ext.stop_exception_dialog();
+            ext.stop_window_io();
 
             delete globalThis.popShellExtension;
             ext.injections_remove();

@@ -1,140 +1,121 @@
-import * as lib from './lib.js';
-
 import Gio from 'gi://Gio';
-import { spawn } from 'resource:///org/gnome/shell/misc/util.js';
+import GLib from 'gi://GLib';
 
-export var MOTIF_HINTS: string = '_MOTIF_WM_HINTS';
-export var HIDE_FLAGS: string[] = ['0x2', '0x0', '0x0', '0x0', '0x0'];
-export var SHOW_FLAGS: string[] = ['0x2', '0x0', '0x1', '0x0', '0x0'];
+export const MOTIF_HINTS = '_MOTIF_WM_HINTS';
+export const HIDE_FLAGS = ['0x2', '0x0', '0x0', '0x0', '0x0'];
+export const SHOW_FLAGS = ['0x2', '0x0', '0x1', '0x0', '0x0'];
+const TIMEOUT_MS = 1500;
 
-//export var FRAME_EXTENTS: string = "_GTK_FRAME_EXTENTS"
-
-export function get_window_role(xid: string): string | null {
-    let out = xprop_cmd(xid, 'WM_WINDOW_ROLE');
-
-    if (!out) return null;
-
-    return parse_string(out);
+export interface DecorationInfo {
+    may_decorate: boolean;
+    client_decorated: boolean;
 }
 
-export function get_frame_extents(xid: string): string | null {
-    let out = xprop_cmd(xid, "_GTK_FRAME_EXTENTS");
-
-    if (!out) return null;
-
-    return parse_string(out)
+function valid_xid(xid: string): boolean {
+    return /^0x[0-9a-f]+$/i.test(xid);
 }
 
-export function get_hint(xid: string, hint: string): Array<string> | null {
-    let out = xprop_cmd(xid, hint);
-
-    if (!out) return null;
-
-    const array = parse_cardinal(out);
-
-    return array ? array.map((value) => (value.startsWith('0x') ? value : '0x' + value)) : null;
-}
-
-function size_params(line: string): [number, number] | null {
-    let fields = line.split(' ');
-    let x = lib.dbg(lib.nth_rev(fields, 2));
-    let y = lib.dbg(lib.nth_rev(fields, 0));
-
-    if (!x || !y) return null;
-
-    let xn = parseInt(x, 10);
-    let yn = parseInt(y, 10);
-
-    return isNaN(xn) || isNaN(yn) ? null : [xn, yn];
-}
-
-export function get_size_hints(xid: string): lib.SizeHint | null {
-    let out = xprop_cmd(xid, 'WM_NORMAL_HINTS');
-    if (out) {
-        let lines = out.split('\n')[Symbol.iterator]();
-        lines.next();
-
-        let minimum: string | undefined = lines.next().value;
-        let increment: string | undefined = lines.next().value;
-        let base: string | undefined = lines.next().value;
-
-        if (!minimum || !increment || !base) return null;
-
-        let min_values = size_params(minimum);
-        let inc_values = size_params(increment);
-        let base_values = size_params(base);
-
-        if (!min_values || !inc_values || !base_values) return null;
-
-        return {
-            minimum: min_values,
-            increment: inc_values,
-            base: base_values,
+/** One bounded subprocess; cancellation never cancels the caller's token. */
+function command(argv: string[], cancellable: any): Promise<string | null> {
+    return new Promise((resolve) => {
+        if (cancellable?.is_cancelled()) { resolve(null); return; }
+        const io = new Gio.Cancellable();
+        let process: any = null;
+        let timer: SignalID | null = null;
+        let connection = 0;
+        let stopped = false;
+        let finished = false;
+        const stop = () => {
+            if (stopped || finished) return;
+            stopped = true;
+            try { process?.force_exit(); } catch (_) { }
+            io.cancel();
         };
-    }
+        const finish = (value: string | null) => {
+            if (finished) return;
+            finished = true;
+            if (timer !== null) {
+                const id = timer; timer = null;
+                try { GLib.source_remove(id); } catch (_) { }
+            }
+            // Called from the communication callback, not from inside cancel().
+            if (connection !== 0) {
+                const id = connection; connection = 0;
+                try { cancellable.disconnect(id); } catch (_) { }
+            }
+            resolve(value);
+        };
+        try {
+            process = Gio.Subprocess.new(argv,
+                Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
+            if (cancellable) connection = cancellable.connect(stop);
+            timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, TIMEOUT_MS, () => {
+                timer = null;
+                stop();
+                return false;
+            });
+            process.communicate_utf8_async(null, io, (source: any, res: any) => {
+                try {
+                    const [, output] = source.communicate_utf8_finish(res);
+                    finish(!stopped && !io.is_cancelled() && source.get_successful() ? output ?? '' : null);
+                } catch (_) {
+                    stop();
+                    finish(null);
+                }
+            });
+        } catch (_) {
+            stop();
+            finish(null);
+        }
+    });
+}
 
-    return null;
+function cardinals(line: string): number[] | null {
+    const equals = line.indexOf('=');
+    if (equals < 0) return null;
+    const fields = line.slice(equals + 1).trim().split(/\s*,\s*/);
+    if (!fields.length || fields.some(value => !/^(?:0x[0-9a-f]+|[0-9]+)$/i.test(value))) return null;
+    const numbers = fields.map(value => Number(value));
+    return numbers.every(value => Number.isSafeInteger(value) && value >= 0 && value <= 0xffffffff) ? numbers : null;
+}
+
+export async function query_decoration(xid: string, cancellable: any): Promise<DecorationInfo | null> {
+    if (!valid_xid(xid)) return null;
+    const output = await command(['xprop', '-id', xid, MOTIF_HINTS, '_GTK_FRAME_EXTENTS'], cancellable);
+    if (output === null) return null;
+    let motif: number[] | null = null;
+    let extents: number[] | null = null;
+    let seen_motif = false;
+    let seen_extents = false;
+    for (const line of output.split('\n')) {
+        if (line.startsWith(MOTIF_HINTS)) {
+            seen_motif = true;
+            motif = cardinals(line);
+            if (line.includes('=') && (!motif || motif.length !== 5)) return null;
+            if (!line.includes('=') && !/not found|no such atom/i.test(line)) return null;
+        } else if (line.startsWith('_GTK_FRAME_EXTENTS')) {
+            seen_extents = true;
+            extents = cardinals(line);
+            if (line.includes('=') && (!extents || extents.length !== 4)) return null;
+            if (!line.includes('=') && !/not found|no such atom/i.test(line)) return null;
+        }
+    }
+    if (!seen_motif || !seen_extents) return null;
+    return {
+        // Preserve the previous decoration policy; only transport/parsing changes.
+        may_decorate: motif === null || motif[2] === 0 || motif[2] === 1,
+        client_decorated: extents !== null,
+    };
+}
+
+export async function set_hint(xid: string, hint: string, value: string[], cancellable: any): Promise<boolean> {
+    if (!valid_xid(xid) || hint !== MOTIF_HINTS ||
+        (value.join(',') !== HIDE_FLAGS.join(',') && value.join(',') !== SHOW_FLAGS.join(','))) return false;
+    return (await command(['xprop', '-id', xid, '-f', hint, '32c', '-set', hint, value.join(', ')], cancellable)) !== null;
 }
 
 export function get_xid(meta: Meta.Window): string | null {
-    const desc = meta.get_description();
-    const match = desc && desc.match(/0x[0-9a-f]+/);
-    return match && match[0];
-}
-
-export function may_decorate(xid: string): boolean {
-    const hints = motif_hints(xid);
-    return hints ? hints[2] == '0x0' || hints[2] == '0x1' : true;
-}
-
-export function motif_hints(xid: string): Array<string> | null {
-    return get_hint(xid, MOTIF_HINTS);
-}
-
-export function set_hint(xid: string, hint: string, value: string[]) {
-    if (!/^0x[0-9a-f]+$/i.test(xid)) return;
-    spawn(['xprop', '-id', xid, '-f', hint, '32c', '-set', hint, value.join(', ')]);
-}
-
-function consume_key(string: string): number | null {
-    const pos = string.indexOf('=');
-    return -1 == pos ? null : pos;
-}
-
-function parse_cardinal(string: string): Array<string> | null {
-    const pos = consume_key(string);
-    return pos
-        ? string
-              .slice(pos + 1)
-              .trim()
-              .split(', ')
-        : null;
-}
-
-function parse_string(string: string): string | null {
-    const pos = consume_key(string);
-    return pos
-        ? string
-              .slice(pos + 1)
-              .trim()
-              .slice(1, -1)
-        : null;
-}
-
-function xprop_cmd(xid: string, args: string): string | null {
-    // Window IDs are always hexadecimal; reject anything else so it can never
-    // be interpreted as an extra command-line argument.
-    if (!/^0x[0-9a-f]+$/i.test(xid)) return null;
-
-    try {
-        const proc = Gio.Subprocess.new(
-            ['xprop', '-id', xid, args],
-            Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE,
-        );
-        const [, stdout] = proc.communicate_utf8(null, null);
-        return stdout;
-    } catch (why) {
-        lib.dbg(`xprop failed: ${why}`);
-        return null;
-    }
+    const description = meta.get_description();
+    const match = description && description.match(/0x[0-9a-f]+/i);
+    return match ? match[0] : null;
 }

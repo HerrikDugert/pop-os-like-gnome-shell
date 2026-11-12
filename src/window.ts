@@ -5,6 +5,7 @@ import * as Rect from './rectangle.js';
 import * as Tags from './tags.js';
 import * as utils from './utils.js';
 import * as xprop from './xprop.js';
+import { DecorationController } from './decorations.js';
 import type { Entity } from './ecs.js';
 import type { Ext } from './extension.js';
 import type { Rectangle } from './rectangle.js';
@@ -47,8 +48,6 @@ enum RESTACK_SPEED {
 }
 
 interface X11Info {
-    normal_hints: once_cell.OnceCell<lib.SizeHint | null>;
-    wm_role_: once_cell.OnceCell<string | null>;
     xid_: once_cell.OnceCell<string | null>;
 }
 
@@ -78,11 +77,10 @@ export class ShellWindow {
 
     window_app: any;
 
-    private was_hidden: boolean = false;
+    private decoration_state = { hidden: false };
+    private decoration_controller: DecorationController | null = null;
 
     private extra: X11Info = {
-        normal_hints: new OnceCell(),
-        wm_role_: new OnceCell(),
         xid_: new OnceCell(),
     };
 
@@ -100,16 +98,6 @@ export class ShellWindow {
         // Float fullscreen windows by default, such as Kodi.
         if (this.meta.is_fullscreen()) {
             ext.add_tag(entity, Tags.Floating);
-        }
-
-        if (this.may_decorate()) {
-            if (!this.is_client_decorated()) {
-                if (ext.settings.show_title()) {
-                    this.decoration_show(ext);
-                } else {
-                    this.decoration_hide(ext);
-                }
-            }
         }
 
         this.bind_window_events();
@@ -224,25 +212,22 @@ export class ShellWindow {
         return out;
     }
 
-    private decoration(_ext: Ext, callback: (xid: string) => void): void {
-        if (this.may_decorate()) {
-            const xid = this.xid();
-            if (xid) callback(xid);
+    /** Called for initialization, title settings changes and regular reenable. */
+    update_decoration(ext: Ext): void {
+        if (utils.is_wayland() || !ext.allows_window_io()) return;
+        const xid = this.xid();
+        if (!xid) return;
+        if (!this.decoration_controller) {
+            this.decoration_controller = new DecorationController(xid, this.decoration_state,
+                () => ext.allows_window_io() && this.actor_exists() && ext.windows.get(this.entity) === this,
+                () => !this.ignore_decoration());
         }
+        this.decoration_controller.update(ext.settings.show_title());
     }
 
-    decoration_hide(ext: Ext): void {
-        if (this.ignore_decoration()) return;
-
-        this.was_hidden = true;
-
-        this.decoration(ext, (xid) => xprop.set_hint(xid, xprop.MOTIF_HINTS, xprop.HIDE_FLAGS));
-    }
-
-    decoration_show(ext: Ext): void {
-        if (!this.was_hidden) return;
-
-        this.decoration(ext, (xid) => xprop.set_hint(xid, xprop.MOTIF_HINTS, xprop.SHOW_FLAGS));
+    cancel_decoration(): void {
+        this.decoration_controller?.dispose();
+        this.decoration_controller = null;
     }
 
     icon(_ext: Ext, size: number): any {
@@ -262,21 +247,6 @@ export class ShellWindow {
         const name = this.meta.get_wm_class();
         if (name === null) return true;
         return WM_TITLE_BLACKLIST.findIndex((n) => name.startsWith(n)) !== -1;
-    }
-
-    is_client_decorated(): boolean {
-        // Meta.Window.is_client_decorated() was removed in Meta 15 (GNOME 47).
-        // On Wayland (GNOME 50+ is Wayland-only), xprop doesn't work, so we
-        // use the 'decorated' property: if the WM is NOT drawing decorations,
-        // then the client is drawing its own (client-side decorations).
-        if (utils.is_wayland()) {
-            return !this.meta.decorated;
-        }
-        // X11 fallback: check _GTK_FRAME_EXTENTS via xprop
-        const xid = this.xid();
-        const extents = xid ? xprop.get_frame_extents(xid) : false;
-        if (!extents) return false;
-        return true;
     }
 
     is_maximized(): boolean {
@@ -365,11 +335,6 @@ export class ShellWindow {
         return this.meta.get_transient_for() !== null;
     }
 
-    may_decorate(): boolean {
-        const xid = this.xid();
-        return xid ? xprop.may_decorate(xid) : false;
-    }
-
     move(ext: Ext, rect: Rectangular, on_complete?: () => void) {
         if (!this.same_workspace() && this.is_maximized()) {
             return;
@@ -417,13 +382,6 @@ export class ShellWindow {
         return Rect.Rectangle.from_meta(this.meta.get_frame_rect());
     }
 
-    size_hint(): lib.SizeHint | null {
-        return this.extra.normal_hints.get_or_init(() => {
-            const xid = this.xid();
-            return xid ? xprop.get_size_hints(xid) : null;
-        });
-    }
-
     swap(ext: Ext, other: ShellWindow): void {
         let ar = this.rect().clone();
         let br = other.rect().clone();
@@ -435,13 +393,6 @@ export class ShellWindow {
     title(): string {
         const title = this.meta.get_title();
         return title ? title : this.name(this.ext);
-    }
-
-    wm_role(): string | null {
-        return this.extra.wm_role_.get_or_init(() => {
-            const xid = this.xid();
-            return xid ? xprop.get_window_role(xid) : null;
-        });
     }
 
     workspace_id(): number {

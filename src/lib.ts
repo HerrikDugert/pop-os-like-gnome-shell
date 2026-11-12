@@ -6,12 +6,6 @@ import type { Rectangle } from './rectangle.js';
 import Meta from 'gi://Meta';
 import St from 'gi://St';
 
-export interface SizeHint {
-    minimum: [number, number];
-    increment: [number, number];
-    base: [number, number];
-}
-
 export enum Orientation {
     HORIZONTAL = 0,
     VERTICAL = 1,

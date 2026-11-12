@@ -240,8 +240,13 @@ export class Ext extends Ecs.System<ExtEvent> {
     /** Calculates window placements when tiling and focus-switching */
     tiler: Tiling.Tiler = new Tiling.Tiler(this);
 
+    private event_executor: Executor.GLibExecutor<ExtEvent>;
+    private events_enabled: boolean = true;
+
     constructor() {
-        super(new Executor.GLibExecutor());
+        const executor = new Executor.GLibExecutor<ExtEvent>();
+        super(executor);
+        this.event_executor = executor;
 
         this.load_settings();
         this.reload_theme();
@@ -280,6 +285,21 @@ export class Ext extends Ecs.System<ExtEvent> {
     }
 
     // System interface
+
+    /** Resume event registration when reusing this instance after disable. */
+    start_events() {
+        this.events_enabled = true;
+    }
+
+    /** Reject late registrations before removing the current mainloop source. */
+    stop_events() {
+        this.events_enabled = false;
+        this.event_executor.stop();
+    }
+
+    register(event: ExtEvent): void {
+        if (this.events_enabled) super.register(event);
+    }
 
     /** Registers a generic callback to be executed in the event loop. */
     register_fn(callback: () => void, name?: string) {
@@ -2321,6 +2341,7 @@ export class Ext extends Ecs.System<ExtEvent> {
         }
 
         this.tiler.queue.stop();
+        this.tiler.queue.clear();
 
         this.signals.clear();
     }
@@ -2905,6 +2926,7 @@ export default class PopShellExtension extends Extension {
             });
         }
 
+        ext.start_events();
         ext.dbus.start();
 
         if (ext.settings.show_skiptaskbar()) {
@@ -2944,6 +2966,8 @@ export default class PopShellExtension extends Extension {
                 ext.was_locked = true;
                 return;
             }
+
+            ext.stop_events();
 
             delete globalThis.popShellExtension;
             ext.injections_remove();

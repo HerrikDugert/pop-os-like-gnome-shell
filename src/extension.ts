@@ -242,6 +242,9 @@ export class Ext extends Ecs.System<ExtEvent> {
 
     private event_executor: Executor.GLibExecutor<ExtEvent>;
     private events_enabled: boolean = true;
+    private exception_ipc: utils.AsyncIPC | null = null;
+    private exception_generation: number = 0;
+    private exception_select_timer: SignalID | null = null;
 
     constructor() {
         const executor = new Executor.GLibExecutor<ExtEvent>();
@@ -547,51 +550,62 @@ export class Ext extends Ecs.System<ExtEvent> {
         d.open();
     }
 
-    exception_dialog() {
-        let path = get_current_path() + '/floating_exceptions/main.js';
+    stop_exception_dialog() {
+        this.exception_generation += 1;
+        const ipc = this.exception_ipc;
+        this.exception_ipc = null;
+        if (this.exception_select_timer !== null) {
+            GLib.source_remove(this.exception_select_timer);
+            this.exception_select_timer = null;
+        }
+        this.exception_selecting = false;
+        ipc?.dispose();
+    }
 
-        const event_handler = (event: string): boolean => {
-            switch (event) {
+    exception_dialog() {
+        if (!this.events_enabled || (this.exception_ipc && !this.exception_ipc.disposed)) return;
+        this.stop_exception_dialog();
+        const generation = this.exception_generation;
+        const current = () => this.events_enabled && generation === this.exception_generation;
+        const path = get_current_path() + '/floating_exceptions/main.js';
+        const ipc = utils.async_process_ipc(['gjs', '--module', path]);
+        if (!ipc) return;
+        this.exception_ipc = ipc;
+        ipc.read_lines((line: string) => {
+            if (!current()) return false;
+            switch (line.trim()) {
                 case 'MODIFIED':
                     this.register_fn(() => {
+                        if (!current()) return;
                         this.conf.reload();
                         this.tiling_config_reapply();
                     });
                     break;
                 case 'SELECT':
-                    this.register_fn(() => this.exception_select());
+                    this.register_fn(() => {
+                        if (current()) this.exception_select(generation);
+                    });
                     return false;
             }
-
             return true;
-        };
-
-        const ipc = utils.async_process_ipc(['gjs', '--module', path]);
-
-        if (ipc) {
-            const generator = (stdout: any, res: any) => {
-                try {
-                    const [bytes] = stdout.read_line_finish(res);
-                    if (bytes) {
-                        if (event_handler((imports.byteArray.toString(bytes) as string).trim())) {
-                            ipc.stdout.read_line_async(0, ipc.cancellable, generator);
-                        }
-                    }
-                } catch (why) {
-                    log.error(`failed to read response from floating exceptions dialog: ${why}`);
-                }
-            };
-
-            ipc.stdout.read_line_async(0, ipc.cancellable, generator);
-        }
+        }, () => {
+            if (this.exception_ipc === ipc) this.exception_ipc = null;
+        });
     }
 
-    exception_select() {
-        GLib.timeout_add(GLib.PRIORITY_LOW, 500, () => {
-            this.exception_selecting = true;
-            overview.show();
+    exception_select(generation: number = this.exception_generation) {
+        if (!this.events_enabled || generation !== this.exception_generation) return;
+        if (this.exception_select_timer !== null) GLib.source_remove(this.exception_select_timer);
+        const timer = GLib.timeout_add(GLib.PRIORITY_LOW, 500, () => {
+            if (this.exception_select_timer !== timer) return false;
+            this.exception_select_timer = null;
+            if (this.events_enabled && generation === this.exception_generation) {
+                this.exception_selecting = true;
+                overview.show();
+            }
             return false;
         });
+        this.exception_select_timer = timer;
     }
 
     exit_modes() {
@@ -2968,6 +2982,7 @@ export default class PopShellExtension extends Extension {
             }
 
             ext.stop_events();
+            ext.stop_exception_dialog();
 
             delete globalThis.popShellExtension;
             ext.injections_remove();

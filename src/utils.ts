@@ -1,6 +1,5 @@
 import * as result from './result.js';
 import * as error from './error.js';
-import * as log from './log.js';
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
@@ -99,42 +98,127 @@ export type AsyncIPC = {
     stdout: any;
     stdin: any;
     cancellable: any;
+    readonly disposed: boolean;
+    read_lines: (on_line: (line: string) => boolean, on_closed?: () => void) => void;
+    dispose: (terminate?: boolean) => void;
 };
 
+function ipc_error(why: unknown) {
+    try {
+        (globalThis as any).log(`pop-shell IPC: ${why}`);
+    } catch (_) {
+        // Cleanup remains safe after the extension's logging context is removed.
+    }
+}
+
+/** Owns one helper process. Normal process exit never cancels buffered output. */
 export function async_process_ipc(argv: Array<string>): AsyncIPC | null {
-    const { SubprocessLauncher, SubprocessFlags } = Gio;
+    let child: any = null;
+    let stdin: any = null;
+    let stdout: any = null;
+    let launcher: any = null;
+    const cancellable = new Gio.Cancellable();
+    let disposed = false;
+    let exited = false;
+    let kill_requested = false;
+    let reading = false;
+    let started = false;
+    let closing = false;
+    let notified = false;
+    let on_closed: (() => void) | undefined;
 
-    const launcher = new SubprocessLauncher({
-        flags: SubprocessFlags.STDIN_PIPE | SubprocessFlags.STDOUT_PIPE,
-    });
+    const close_streams = () => {
+        if (reading || closing) return;
+        closing = true;
+        for (const stream of [stdin, stdout]) {
+            if (!stream) continue;
+            try {
+                stream.close_async(GLib.PRIORITY_DEFAULT, null, (source: any, res: any) => {
+                    try { source.close_finish(res); } catch (why) { ipc_error(why); }
+                });
+            } catch (why) { ipc_error(why); }
+        }
+    };
 
-    let child: any;
-
-    let cancellable = new Gio.Cancellable();
+    const dispose = (terminate: boolean = true) => {
+        if (terminate && child && !exited && !kill_requested) {
+            kill_requested = true;
+            try { child.force_exit(); } catch (why) { ipc_error(why); }
+        }
+        if (!disposed) {
+            disposed = true;
+            cancellable.cancel();
+        }
+        close_streams();
+        if (!notified && on_closed && (exited || kill_requested)) {
+            notified = true;
+            try { on_closed(); } catch (why) { ipc_error(why); }
+        }
+    };
 
     try {
+        launcher = new Gio.SubprocessLauncher({
+            flags: Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDOUT_PIPE,
+        });
         child = launcher.spawnv(argv);
+        // Keep raw streams as a fallback if wrapper construction fails.
+        stdin = child.get_stdin_pipe();
+        stdout = child.get_stdout_pipe();
+        stdin = new Gio.DataOutputStream({ base_stream: stdin, close_base_stream: true });
+        stdout = new Gio.DataInputStream({ base_stream: stdout, close_base_stream: true });
+        child.wait_async(null, (source: any, res: any) => {
+            try {
+                source.wait_finish(res);
+                exited = true;
+                if (!kill_requested && !source.get_successful()) ipc_error('helper exited unsuccessfully');
+                // The reader owns EOF: do not cancel here, even after an error exit.
+                if (disposed) dispose(false);
+            } catch (why) {
+                ipc_error(why);
+                dispose();
+            }
+        });
     } catch (why) {
-        log.error(`failed to spawn ${argv}: ${why}`);
+        ipc_error(`failed to start ${argv}: ${why}`);
+        dispose();
         return null;
+    } finally {
+        if (launcher) {
+            try { launcher.close(); } catch (why) { ipc_error(why); }
+        }
     }
 
-    let stdin = new Gio.DataOutputStream({
-        base_stream: child.get_stdin_pipe(),
-        close_base_stream: true,
-    });
+    const read_lines = (on_line: (line: string) => boolean, closed?: () => void) => {
+        if (started || disposed) return;
+        started = true;
+        on_closed = closed;
+        const next = () => {
+            if (disposed) return;
+            reading = true;
+            try {
+                stdout.read_line_async(GLib.PRIORITY_DEFAULT, cancellable, (source: any, res: any) => {
+                    reading = false;
+                    try {
+                        const [line] = source.read_line_finish_utf8(res);
+                        if (disposed) { close_streams(); return; }
+                        if (line === null) { dispose(false); return; }
+                        if (!on_line(line)) { dispose(); return; }
+                        next();
+                    } catch (why) {
+                        if (!disposed) { ipc_error(why); dispose(); }
+                        else close_streams();
+                    }
+                });
+            } catch (why) {
+                reading = false;
+                ipc_error(why);
+                dispose();
+            }
+        };
+        next();
+    };
 
-    let stdout = new Gio.DataInputStream({
-        base_stream: child.get_stdout_pipe(),
-        close_base_stream: true,
-    });
-
-    child.wait_async(null, (source: any, res: any) => {
-        source.wait_finish(res);
-        cancellable.cancel();
-    });
-
-    return { child, stdin, stdout, cancellable };
+    return { child, stdin, stdout, cancellable, get disposed() { return disposed; }, read_lines, dispose };
 }
 
 export function map_eq<K, V>(map1: Map<K, V>, map2: Map<K, V>) {

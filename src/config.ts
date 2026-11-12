@@ -40,11 +40,12 @@ function compile_regex(source: string): RegExp | null {
 }
 
 function valid_rule(value: any): value is FloatRule {
-    if (value === null || typeof value !== 'object') return false;
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
     if (value.class !== undefined && typeof value.class !== 'string') return false;
     if (value.title !== undefined && typeof value.title !== 'string') return false;
     if (value.disabled !== undefined && typeof value.disabled !== 'boolean') return false;
-    return true;
+    return (typeof value.class === 'string' && value.class.length > 0) ||
+        (typeof value.title === 'string' && value.title.length > 0);
 }
 
 export const DEFAULT_FLOAT_RULES: Array<FloatRule> = [
@@ -144,6 +145,7 @@ export class Config {
 
     window_shall_float(wclass: string, title: string): boolean {
         for (const rule of this.float.concat(DEFAULT_FLOAT_RULES)) {
+            if (!valid_rule(rule)) continue;
             if (rule.class) {
                 const regex = compile_regex(rule.class);
                 if (!regex || !regex.test(wclass)) {
@@ -171,6 +173,7 @@ export class Config {
         if (!meta_window.is_skip_taskbar()) return false;
 
         for (const rule of this.skiptaskbarhidden.concat(SKIPTASKBAR_EXCEPTIONS)) {
+            if (!valid_rule(rule)) continue;
             if (rule.class) {
                 const regex = compile_regex(rule.class);
                 if (!regex || !regex.test(wmclass)) {
@@ -192,12 +195,13 @@ export class Config {
     }
 
     reload() {
-        REGEX_CACHE.clear();
         const conf = Config.from_config();
 
         if (conf.tag === 0) {
-            let c = conf.value;
+            const c = conf.value;
+            REGEX_CACHE.clear();
             this.float = c.float;
+            this.skiptaskbarhidden = c.skiptaskbarhidden;
             this.log_on_focus = c.log_on_focus;
         } else {
             log(`error loading conf: ${conf.why}`);
@@ -219,80 +223,65 @@ export class Config {
     }
 
     toggle_system_exception(wmclass: string | undefined, wmtitle: string | undefined, disabled: boolean) {
-        if (disabled) {
-            for (const value of DEFAULT_FLOAT_RULES) {
-                if (value.class === wmclass && value.title === wmtitle) {
-                    value.disabled = disabled;
-                    this.float.push(value);
-                    this.sync_to_disk();
-                    return;
-                }
-            }
-        }
+        const standard = DEFAULT_FLOAT_RULES.find(rule => rule.class === wmclass && rule.title === wmtitle);
+        if (!standard) return;
 
-        let index = 0;
-        let found = false;
-        for (const value of this.float) {
-            if (value.class === wmclass && value.title === wmtitle) {
-                found = true;
-                break;
-            }
-            index += 1;
-        }
+        const matching = this.float.filter(rule => rule.class === wmclass && rule.title === wmtitle);
+        if (disabled && matching.length === 1 && matching[0].disabled === true) return;
+        if (!disabled && matching.length === 0) return;
 
-        if (found) swap_remove(this.float, index);
-
+        this.float = this.float.filter(rule => rule.class !== wmclass || rule.title !== wmtitle);
+        if (disabled) this.float.push({ ...standard, disabled: true });
         this.sync_to_disk();
     }
 
     remove_user_exception(wmclass: string | undefined, wmtitle: string | undefined) {
-        let index = 0;
-        let found = new Array();
-        for (const value of this.float.values()) {
-            if (value.class === wmclass && value.title === wmtitle) {
-                found.push(index);
-            }
-
-            index += 1;
-        }
-
-        if (found.length !== 0) {
-            for (const idx of found) swap_remove(this.float, idx);
-
-            this.sync_to_disk();
-        }
+        const remaining = this.float.filter(rule => rule.class !== wmclass || rule.title !== wmtitle);
+        if (remaining.length === this.float.length) return;
+        this.float = remaining;
+        this.sync_to_disk();
     }
 
+    /** Preserve the existing public fallback API; reload uses the strict result. */
     static from_json(json: string): Config {
-        const config = new Config();
+        const parsed = Config.parse_json(json);
+        if (parsed.tag === 0) return parsed.value;
+        log(`pop-shell: failed to parse config: ${parsed.why}`);
+        return new Config();
+    }
 
+    private static parse_json(json: string): Result<Config> {
         try {
             const data = JSON.parse(json);
-            if (data === null || typeof data !== 'object') return config;
-
-            if (Array.isArray(data.float)) {
-                config.float = data.float.filter(valid_rule);
+            if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+                return { tag: 1, why: 'config root must be an object' };
+            }
+            if (data.float !== undefined && !Array.isArray(data.float)) {
+                return { tag: 1, why: 'float must be an array' };
+            }
+            if (data.skiptaskbarhidden !== undefined && !Array.isArray(data.skiptaskbarhidden)) {
+                return { tag: 1, why: 'skiptaskbarhidden must be an array' };
+            }
+            if (data.log_on_focus !== undefined && typeof data.log_on_focus !== 'boolean') {
+                return { tag: 1, why: 'log_on_focus must be a boolean' };
             }
 
+            const config = new Config();
+            if (Array.isArray(data.float)) config.float = data.float.filter(valid_rule);
             if (Array.isArray(data.skiptaskbarhidden)) {
                 config.skiptaskbarhidden = data.skiptaskbarhidden.filter(valid_rule);
             }
-
-            if (typeof data.log_on_focus === 'boolean') {
-                config.log_on_focus = data.log_on_focus;
-            }
+            if (typeof data.log_on_focus === 'boolean') config.log_on_focus = data.log_on_focus;
+            return { tag: 0, value: config };
         } catch (why) {
-            log(`pop-shell: failed to parse config: ${why}`);
+            return { tag: 1, why: `invalid config JSON: ${why}` };
         }
-
-        return config;
     }
 
     private static from_config(): Result<Config> {
         const stream = Config.read();
         if (stream.tag === 1) return stream;
-        let value = Config.from_json(stream.value);
-        return { tag: 0, value };
+        return Config.parse_json(stream.value);
     }
 
     private static gio_file(): Result<any> {
@@ -322,7 +311,8 @@ export class Config {
             const file = Config.gio_file();
             if (file.tag === 1) return file;
 
-            const [, buffer] = file.value.load_contents(null);
+            const [ok, buffer] = file.value.load_contents(null);
+            if (!ok) return { tag: 1, why: 'failed to read config contents' };
 
             return { tag: 0, value: imports.byteArray.toString(buffer) };
         } catch (why) {
@@ -335,16 +325,22 @@ export class Config {
             const file = Config.gio_file();
             if (file.tag === 1) return file;
 
-            file.value.replace_contents(data, null, false, Gio.FileCreateFlags.NONE, null);
+            const [ok] = file.value.replace_contents(data, null, false, Gio.FileCreateFlags.NONE, null);
+            if (!ok) return { tag: 1, why: 'failed to replace config contents' };
 
-            return { tag: 0, value: file.value };
+            return { tag: 0, value: null };
         } catch (why) {
             return { tag: 1, why: `failed to write to config: ${why}` };
         }
     }
 
-    sync_to_disk() {
-        Config.write(this.to_json());
+    sync_to_disk(): boolean {
+        const written = Config.write(this.to_json());
+        if (written.tag === 1) {
+            log(`pop-shell: failed to save config: ${written.why}`);
+            return false;
+        }
+        return true;
     }
 }
 
@@ -355,7 +351,3 @@ function set_to_json(_key: string, value: any) {
     return value;
 }
 
-function swap_remove<T>(array: Array<T>, index: number): T | undefined {
-    array[index] = array[array.length - 1];
-    return array.pop();
-}

@@ -94,6 +94,8 @@ declare module 'gi://GLib' {
         find_program_in_path(prog: string): string | null;
         get_current_dir(): string;
         get_monotonic_time(): number;
+        uuid_string_random(): string;
+        Bytes: { new (data: Uint8Array): unknown };
 
         idle_add(priority: any, callback: () => boolean): number;
 

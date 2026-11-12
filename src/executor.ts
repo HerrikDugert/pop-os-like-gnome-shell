@@ -1,37 +1,52 @@
-import * as Ecs from './ecs.js';
+import type * as Ecs from './ecs.js';
 import GLib from 'gi://GLib';
 
 export interface Executor<T> {
     wake<S extends Ecs.System<T>>(system: S, event: T): void;
 }
 
-/** Glib-based event executor */
+function report_error(error: unknown) {
+    try {
+        (globalThis as any).logError(error, 'pop-shell executor callback failed');
+    } catch (_) {
+        // Logging must not interrupt source cleanup or queue processing.
+    }
+}
+
+/** Processes one FIFO event per mainloop dispatch. */
 export class GLibExecutor<T> implements Executor<T> {
     #event_loop: SignalID | null = null;
-    #events: Array<T> = new Array();
+    #events: Array<T> = [];
 
-    /** Creates an idle_add signal that exists only for as long as there are events to process.
-     *
-     * - If the signal has already been created, the event will be added to the queue.
-     * - The signal will continue executing for as long as there are events remaining in the queue.
-     * - Events are handled within batches, yielding between each new set of events.
-     */
     wake<S extends Ecs.System<T>>(system: S, event: T): void {
         this.#events.unshift(event);
+        if (this.#event_loop !== null) return;
 
-        if (this.#event_loop) return;
-
-        this.#event_loop = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
-            let event = this.#events.pop();
-            if (event) system.run(event);
-
+        const signal = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            if (this.#event_loop !== signal) return false;
+            if (this.#events.length > 0) {
+                const next = this.#events.pop() as T;
+                try {
+                    system.run(next);
+                } catch (error) {
+                    report_error(error);
+                }
+            }
+            if (this.#event_loop !== signal) return false;
             if (this.#events.length === 0) {
                 this.#event_loop = null;
                 return false;
             }
-
             return true;
         });
+        this.#event_loop = signal;
+    }
+
+    stop() {
+        const signal = this.#event_loop;
+        this.#event_loop = null;
+        this.#events = [];
+        if (signal !== null) GLib.source_remove(signal);
     }
 }
 
@@ -45,41 +60,54 @@ export class OnceExecutor<X, T extends Iterable<X>> {
 
     start(delay: number, apply: (v: X) => boolean, then?: () => void) {
         this.stop();
-
         const iterator = this.#iterable[Symbol.iterator]();
-
-        this.#signal = GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
-            const next: X = iterator.next().value;
-
-            if (typeof next === 'undefined') {
-                if (then)
-                    GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
-                        then();
-                        return false;
-                    });
-
+        const signal = GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
+            if (this.#signal !== signal) return false;
+            try {
+                const next = iterator.next();
+                if (next.done) {
+                    this.#signal = null;
+                    if (then) {
+                        const completion = GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
+                            if (this.#signal !== completion) return false;
+                            this.#signal = null;
+                            try {
+                                then();
+                            } catch (error) {
+                                report_error(error);
+                            }
+                            return false;
+                        });
+                        this.#signal = completion;
+                    }
+                    return false;
+                }
+                const keep = apply(next.value);
+                if (this.#signal !== signal) return false;
+                if (!keep) this.#signal = null;
+                return keep;
+            } catch (error) {
+                if (this.#signal === signal) this.#signal = null;
+                report_error(error);
                 return false;
             }
-
-            return apply(next);
         });
+        this.#signal = signal;
     }
 
     stop() {
-        if (this.#signal !== null) {
-            GLib.source_remove(this.#signal);
-            this.#signal = null;
-        }
+        const signal = this.#signal;
+        this.#signal = null;
+        if (signal !== null) GLib.source_remove(signal);
     }
 }
 
 export class ChannelExecutor<X> {
-    #channel: Array<X> = new Array();
-
-    #signal: null | number = null;
+    #channel: Array<X> = [];
+    #signal: SignalID | null = null;
 
     clear() {
-        this.#channel.splice(0);
+        this.#channel = [];
     }
 
     get length(): number {
@@ -92,18 +120,27 @@ export class ChannelExecutor<X> {
 
     start(delay: number, apply: (v: X) => boolean) {
         this.stop();
-
-        this.#signal = GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
-            const e = this.#channel.shift();
-
-            return typeof e === 'undefined' ? true : apply(e);
+        const signal = GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
+            if (this.#signal !== signal) return false;
+            if (this.#channel.length === 0) return true;
+            const event = this.#channel.shift() as X;
+            try {
+                const keep = apply(event);
+                if (this.#signal !== signal) return false;
+                if (!keep) this.#signal = null;
+                return keep;
+            } catch (error) {
+                if (this.#signal === signal) this.#signal = null;
+                report_error(error);
+                return false;
+            }
         });
+        this.#signal = signal;
     }
 
     stop() {
-        if (this.#signal !== null) {
-            GLib.source_remove(this.#signal);
-            this.#signal = null;
-        }
+        const signal = this.#signal;
+        this.#signal = null;
+        if (signal !== null) GLib.source_remove(signal);
     }
 }

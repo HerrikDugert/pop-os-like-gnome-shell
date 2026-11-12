@@ -38,6 +38,7 @@ interface ToggleException {
 
 interface RemoveException {
     tag: 3;
+    match: config.MatchMode;
     wmclass: string | undefined;
     wmtitle: string | undefined;
 }
@@ -107,7 +108,7 @@ export class MainView implements View {
         list_frame.add(scroller);
 
         let desc = new Gtk.Label({
-            label: 'Add exceptions by selecting currently running applications and windows.',
+            label: 'Select an application or window to add an exact, case-sensitive exception. Existing regex rules keep their original meaning.',
         });
         desc.set_line_wrap(true);
         desc.set_halign(Gtk.Align.CENTER);
@@ -121,8 +122,9 @@ export class MainView implements View {
         this.widget.add(list_frame);
     }
 
-    add_rule(wmclass: string | undefined, wmtitle: string | undefined) {
-        let label = Gtk.Label.new(wmtitle === undefined ? wmclass : `${wmclass} / ${wmtitle}`);
+    add_rule(wmclass: string | undefined, wmtitle: string | undefined, match: config.MatchMode) {
+        const text = wmtitle === undefined ? wmclass : `${wmclass} / ${wmtitle}`;
+        let label = Gtk.Label.new(`[${match === 'exact' ? 'Exact' : 'Regex'}] ${text}`);
         label.set_xalign(0);
         label.set_hexpand(true);
         label.set_ellipsize(Pango.EllipsizeMode.END);
@@ -139,7 +141,7 @@ export class MainView implements View {
 
         button.connect('clicked', () => {
             widget.destroy();
-            this.callback({ tag: 3, wmclass, wmtitle });
+            this.callback({ tag: 3, wmclass, wmtitle, match });
         });
 
         this.list.add(widget);
@@ -250,7 +252,7 @@ class App {
         for (const value of Array.from<any>(this.config.float)) {
             let wmtitle = value.title ?? undefined;
             let wmclass = value.class ?? undefined;
-            if (!value.disabled) this.main_view.add_rule(wmclass, wmtitle);
+            if (!value.disabled) this.main_view.add_rule(wmclass, wmtitle, config.rule_mode(value));
         }
 
         let event_handler = (event: Event) => {
@@ -286,7 +288,7 @@ class App {
                 // RemoveException
                 case 3:
                     log(`removing exception`);
-                    this.config.remove_user_exception(event.wmclass, event.wmtitle);
+                    this.config.remove_user_exception(event.wmclass, event.wmtitle, event.match);
                     println('MODIFIED');
                     break;
             }

@@ -4,10 +4,13 @@ import Gio from 'gi://Gio';
 const CONF_DIR: string = GLib.get_user_config_dir() + '/pop-shell';
 export var CONF_FILE: string = CONF_DIR + '/config.json';
 
+export type MatchMode = 'exact' | 'regex';
+
 export interface FloatRule {
     class?: string;
     title?: string;
     disabled?: boolean;
+    match?: MatchMode;
 }
 
 interface Ok<T> {
@@ -43,6 +46,7 @@ function valid_rule(value: any): value is FloatRule {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
     if (value.class !== undefined && typeof value.class !== 'string') return false;
     if (value.title !== undefined && typeof value.title !== 'string') return false;
+    if (value.match !== undefined && value.match !== 'exact' && value.match !== 'regex') return false;
     if (value.disabled !== undefined && typeof value.disabled !== 'boolean') return false;
     return (typeof value.class === 'string' && value.class.length > 0) ||
         (typeof value.title === 'string' && value.title.length > 0);
@@ -91,6 +95,7 @@ export interface WindowRule {
     class?: string;
     title?: string;
     disabled?: boolean;
+    match?: MatchMode;
 }
 
 /**
@@ -105,9 +110,24 @@ export const SKIPTASKBAR_EXCEPTIONS: Array<WindowRule> = [
     { class: 'plank' },
 ];
 
-export interface FloatRule {
-    class?: string;
-    title?: string;
+/** Rules without a mode retain their historical regex semantics. */
+export function rule_mode(rule: FloatRule): MatchMode {
+    return rule.match ?? 'regex';
+}
+
+function same_rule(a: FloatRule, b: FloatRule): boolean {
+    return a.class === b.class && a.title === b.title && rule_mode(a) === rule_mode(b);
+}
+
+function matches_rule(rule: FloatRule, wmclass: string | null, title: string | null): boolean {
+    if (!valid_rule(rule)) return false;
+    if (rule_mode(rule) === 'exact') {
+        return (rule.class === undefined || rule.class === wmclass) &&
+            (rule.title === undefined || rule.title === title);
+    }
+    if (rule.class && (typeof wmclass !== 'string' || !compile_regex(rule.class)?.test(wmclass))) return false;
+    if (rule.title && (typeof title !== 'string' || !compile_regex(rule.title)?.test(title))) return false;
+    return true;
 }
 
 export class Config {
@@ -123,74 +143,35 @@ export class Config {
     /** Logs window details on focus of window */
     log_on_focus: boolean = false;
 
-    /** Add a floating exception which matches by wm_class */
+    /** New selections are literal, case-sensitive rules; legacy regex rules coexist. */
     add_app_exception(wmclass: string) {
-        for (const r of this.float) {
-            if (r.class === wmclass && r.title === undefined) return;
-        }
-
-        this.float.push({ class: wmclass });
+        const rule: FloatRule = { class: wmclass, match: 'exact' };
+        if (!valid_rule(rule) || this.float.some(value => same_rule(value, rule))) return;
+        this.float.push(rule);
         this.sync_to_disk();
     }
 
-    /** Add a floating exception which matches by wm_title */
     add_window_exception(wmclass: string, title: string) {
-        for (const r of this.float) {
-            if (r.class === wmclass && r.title === title) return;
-        }
-
-        this.float.push({ class: wmclass, title });
+        const rule: FloatRule = { class: wmclass, title, match: 'exact' };
+        if (!valid_rule(rule) || this.float.some(value => same_rule(value, rule))) return;
+        this.float.push(rule);
         this.sync_to_disk();
     }
 
     window_shall_float(wclass: string, title: string): boolean {
         for (const rule of this.float.concat(DEFAULT_FLOAT_RULES)) {
-            if (!valid_rule(rule)) continue;
-            if (rule.class) {
-                const regex = compile_regex(rule.class);
-                if (!regex || !regex.test(wclass)) {
-                    continue;
-                }
-            }
-
-            if (rule.title) {
-                const regex = compile_regex(rule.title);
-                if (!regex || !regex.test(title)) {
-                    continue;
-                }
-            }
-
-            return rule.disabled ? false : true;
+            if (matches_rule(rule, wclass, title)) return !rule.disabled;
         }
-
         return false;
     }
 
     skiptaskbar_shall_hide(meta_window: any) {
-        let wmclass = meta_window.get_wm_class();
-        let wmtitle = meta_window.get_title();
-
         if (!meta_window.is_skip_taskbar()) return false;
-
+        const wmclass = meta_window.get_wm_class();
+        const title = meta_window.get_title();
         for (const rule of this.skiptaskbarhidden.concat(SKIPTASKBAR_EXCEPTIONS)) {
-            if (!valid_rule(rule)) continue;
-            if (rule.class) {
-                const regex = compile_regex(rule.class);
-                if (!regex || !regex.test(wmclass)) {
-                    continue;
-                }
-            }
-
-            if (rule.title) {
-                const regex = compile_regex(rule.title);
-                if (!regex || !regex.test(wmtitle)) {
-                    continue;
-                }
-            }
-
-            return rule.disabled ? false : true;
+            if (matches_rule(rule, wmclass, title)) return !rule.disabled;
         }
-
         return false;
     }
 
@@ -210,7 +191,7 @@ export class Config {
 
     rule_disabled(rule: FloatRule): boolean {
         for (const value of this.float.values()) {
-            if (value.disabled && rule.class === value.class && value.title === rule.title) {
+            if (value.disabled && same_rule(value, rule)) {
                 return true;
             }
         }
@@ -226,17 +207,18 @@ export class Config {
         const standard = DEFAULT_FLOAT_RULES.find(rule => rule.class === wmclass && rule.title === wmtitle);
         if (!standard) return;
 
-        const matching = this.float.filter(rule => rule.class === wmclass && rule.title === wmtitle);
+        const matching = this.float.filter(rule => same_rule(rule, standard));
         if (disabled && matching.length === 1 && matching[0].disabled === true) return;
         if (!disabled && matching.length === 0) return;
 
-        this.float = this.float.filter(rule => rule.class !== wmclass || rule.title !== wmtitle);
+        this.float = this.float.filter(rule => !same_rule(rule, standard));
         if (disabled) this.float.push({ ...standard, disabled: true });
         this.sync_to_disk();
     }
 
-    remove_user_exception(wmclass: string | undefined, wmtitle: string | undefined) {
-        const remaining = this.float.filter(rule => rule.class !== wmclass || rule.title !== wmtitle);
+    remove_user_exception(wmclass: string | undefined, wmtitle: string | undefined, match: MatchMode = 'regex') {
+        const target: FloatRule = { class: wmclass, title: wmtitle, match };
+        const remaining = this.float.filter(rule => !same_rule(rule, target));
         if (remaining.length === this.float.length) return;
         this.float = remaining;
         this.sync_to_disk();

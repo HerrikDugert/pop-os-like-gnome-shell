@@ -1,8 +1,7 @@
 import GLib from 'gi://GLib';
-import Gio from 'gi://Gio';
+import { AsyncConfigStore } from './config_io.js';
 
-const CONF_DIR: string = GLib.get_user_config_dir() + '/pop-shell';
-export var CONF_FILE: string = CONF_DIR + '/config.json';
+export var CONF_FILE: string = GLib.get_user_config_dir() + '/pop-shell/config.json';
 
 export type MatchMode = 'exact' | 'regex';
 
@@ -23,7 +22,14 @@ interface Error {
     why: string;
 }
 
-type Result<T> = Ok<T> | Error;
+export type Result<T> = Ok<T> | Error;
+
+/** Success includes no-op updates; applied=false does NOT mean the file was unchanged. */
+export type ConfigSaveResult = Ok<{ applied: boolean }> | {
+    tag: 1;
+    why: string;
+    persistence: 'not-started' | 'unknown';
+};
 
 /** Compiled regex cache so window focus checks do not recompile rules every time. */
 const REGEX_CACHE: Map<string, RegExp | null> = new Map();
@@ -130,6 +136,11 @@ function matches_rule(rule: FloatRule, wmclass: string | null, title: string | n
     return true;
 }
 
+// Keep runtime bookkeeping out of JSON.stringify(this).
+const LOAD_GENERATIONS: WeakMap<Config, number> = new WeakMap();
+const ASYNC_STORES: WeakMap<Config, AsyncConfigStore> = new WeakMap();
+const WRITE_QUEUES: WeakMap<Config, Promise<void>> = new WeakMap();
+
 export class Config {
     /** List of windows that should float, regardless of their WM hints */
     float: Array<FloatRule> = [];
@@ -144,18 +155,82 @@ export class Config {
     log_on_focus: boolean = false;
 
     /** New selections are literal, case-sensitive rules; legacy regex rules coexist. */
-    add_app_exception(wmclass: string) {
-        const rule: FloatRule = { class: wmclass, match: 'exact' };
-        if (!valid_rule(rule) || this.float.some(value => same_rule(value, rule))) return;
+    private add_rule(rule: FloatRule): boolean {
+        if (!valid_rule(rule) || this.float.some(value => same_rule(value, rule))) return false;
         this.float.push(rule);
-        this.sync_to_disk();
+        return true;
     }
 
-    add_window_exception(wmclass: string, title: string) {
-        const rule: FloatRule = { class: wmclass, title, match: 'exact' };
-        if (!valid_rule(rule) || this.float.some(value => same_rule(value, rule))) return;
-        this.float.push(rule);
-        this.sync_to_disk();
+    add_app_exception_async(wmclass: string, cancellable: any = null): Promise<ConfigSaveResult> {
+        return this.update_async(config => config.add_rule({ class: wmclass, match: 'exact' }), cancellable);
+    }
+
+    add_window_exception_async(wmclass: string, title: string, cancellable: any = null): Promise<ConfigSaveResult> {
+        return this.update_async(config => config.add_rule({ class: wmclass, title, match: 'exact' }), cancellable);
+    }
+
+    toggle_system_exception_async(wmclass: string | undefined, wmtitle: string | undefined,
+        disabled: boolean, cancellable: any = null): Promise<ConfigSaveResult> {
+        return this.update_async(config => config.set_system_rule(wmclass, wmtitle, disabled), cancellable);
+    }
+
+    remove_user_exception_async(wmclass: string | undefined, wmtitle: string | undefined,
+        match: MatchMode = 'regex', cancellable: any = null): Promise<ConfigSaveResult> {
+        return this.update_async(config => config.remove_rule(wmclass, wmtitle, match), cancellable);
+    }
+
+    private async_store(): AsyncConfigStore {
+        let store = ASYNC_STORES.get(this);
+        if (!store) {
+            store = new AsyncConfigStore(CONF_FILE);
+            ASYNC_STORES.set(this, store);
+        }
+        return store;
+    }
+
+    private update_async(change: (config: Config) => boolean, cancellable: any): Promise<ConfigSaveResult> {
+        this.invalidate_load();
+        const generation = LOAD_GENERATIONS.get(this);
+        const pending = this.save_change(change, generation, cancellable);
+        WRITE_QUEUES.set(this, pending.then(() => undefined, () => undefined));
+        return pending;
+    }
+
+    private async save_change(change: (config: Config) => boolean, generation: number | undefined,
+        cancellable: any): Promise<ConfigSaveResult> {
+        let started = false;
+        try {
+            if (cancellable?.is_cancelled()) {
+                return { tag: 1, why: 'Configuration save cancelled before start', persistence: 'not-started' };
+            }
+            const store = this.async_store();
+            started = true;
+            const snapshot = await store.update(current => {
+                const parsed = Config.parse_json(current ?? '{}');
+                if (parsed.tag === 1) throw new Error(parsed.why);
+                const raw = JSON.parse(current ?? '{}');
+                // Reading retains legacy filtering; writing must not silently erase malformed rules.
+                for (const rules of [raw.float, raw.skiptaskbarhidden]) {
+                    if (Array.isArray(rules) && !rules.every(valid_rule)) {
+                        throw new Error('Refusing to save configuration containing invalid rules');
+                    }
+                }
+                const config = parsed.value;
+                if (!change(config)) return current;
+                return JSON.stringify({ ...raw, float: config.float,
+                    skiptaskbarhidden: config.skiptaskbarhidden, log_on_focus: config.log_on_focus }, set_to_json, 2);
+            }, cancellable);
+
+            const parsed = Config.parse_json(snapshot.text ?? '{}');
+            if (parsed.tag === 1) throw new Error(parsed.why);
+            const applied = LOAD_GENERATIONS.get(this) === generation && !cancellable?.is_cancelled();
+            if (applied) this.apply(parsed.value);
+            return { tag: 0, value: { applied } };
+        } catch (why) {
+            // Even a rejected backend operation may already have persisted its change.
+            return { tag: 1, why: `failed to save config asynchronously: ${why}`,
+                persistence: started ? 'unknown' : 'not-started' };
+        }
     }
 
     window_shall_float(wclass: string, title: string): boolean {
@@ -175,18 +250,51 @@ export class Config {
         return false;
     }
 
-    reload() {
-        const conf = Config.from_config();
+    /** Invalidate pending reads; a supplied Gio.Cancellable controls native cancellation. */
+    invalidate_load(): void {
+        LOAD_GENERATIONS.set(this, (LOAD_GENERATIONS.get(this) ?? 0) + 1);
+    }
 
-        if (conf.tag === 0) {
-            const c = conf.value;
-            REGEX_CACHE.clear();
-            this.float = c.float;
-            this.skiptaskbarhidden = c.skiptaskbarhidden;
-            this.log_on_focus = c.log_on_focus;
-        } else {
-            log(`error loading conf: ${conf.why}`);
+    /** true: applied; false: superseded/cancelled; tag 1: read or validation error. */
+    async reload_async(cancellable: any = null): Promise<Result<boolean>> {
+        this.invalidate_load();
+        const generation = LOAD_GENERATIONS.get(this);
+        const current = () => LOAD_GENERATIONS.get(this) === generation &&
+            !cancellable?.is_cancelled();
+        if (!current()) return { tag: 0, value: false };
+
+        try {
+            const writes = WRITE_QUEUES.get(this);
+            if (writes) {
+                await writes;
+                if (!current()) return { tag: 0, value: false };
+            }
+            const snapshot = await this.async_store().load(cancellable);
+            if (!current()) return { tag: 0, value: false };
+            // An absent file means in-memory defaults, never implicit file creation.
+            const applied = this.load_from_json(snapshot.text ?? '{}');
+            if (applied.tag === 1) return applied;
+            return { tag: 0, value: true };
+        } catch (why) {
+            if (!current()) return { tag: 0, value: false };
+            return { tag: 1, why: `failed to load config asynchronously: ${why}` };
         }
+    }
+
+    /** Apply already-read JSON without filesystem I/O or fallback defaults on error. */
+    load_from_json(json: string): Result<null> {
+        this.invalidate_load();
+        const parsed = Config.parse_json(json);
+        if (parsed.tag === 1) return parsed;
+        this.apply(parsed.value);
+        return { tag: 0, value: null };
+    }
+
+    private apply(config: Config): void {
+        REGEX_CACHE.clear();
+        this.float = config.float;
+        this.skiptaskbarhidden = config.skiptaskbarhidden;
+        this.log_on_focus = config.log_on_focus;
     }
 
     rule_disabled(rule: FloatRule): boolean {
@@ -203,28 +311,26 @@ export class Config {
         return JSON.stringify(this, set_to_json, 2);
     }
 
-    toggle_system_exception(wmclass: string | undefined, wmtitle: string | undefined, disabled: boolean) {
+    private set_system_rule(wmclass: string | undefined, wmtitle: string | undefined, disabled: boolean): boolean {
         const standard = DEFAULT_FLOAT_RULES.find(rule => rule.class === wmclass && rule.title === wmtitle);
-        if (!standard) return;
-
+        if (!standard) return false;
         const matching = this.float.filter(rule => same_rule(rule, standard));
-        if (disabled && matching.length === 1 && matching[0].disabled === true) return;
-        if (!disabled && matching.length === 0) return;
-
+        if (disabled && matching.length === 1 && matching[0].disabled === true) return false;
+        if (!disabled && matching.length === 0) return false;
         this.float = this.float.filter(rule => !same_rule(rule, standard));
         if (disabled) this.float.push({ ...standard, disabled: true });
-        this.sync_to_disk();
+        return true;
     }
 
-    remove_user_exception(wmclass: string | undefined, wmtitle: string | undefined, match: MatchMode = 'regex') {
+    private remove_rule(wmclass: string | undefined, wmtitle: string | undefined, match: MatchMode): boolean {
         const target: FloatRule = { class: wmclass, title: wmtitle, match };
         const remaining = this.float.filter(rule => !same_rule(rule, target));
-        if (remaining.length === this.float.length) return;
+        if (remaining.length === this.float.length) return false;
         this.float = remaining;
-        this.sync_to_disk();
+        return true;
     }
 
-    /** Preserve the existing public fallback API; reload uses the strict result. */
+    /** Pure fallback parser; async loading and saving use the strict result. */
     static from_json(json: string): Config {
         const parsed = Config.parse_json(json);
         if (parsed.tag === 0) return parsed.value;
@@ -260,70 +366,7 @@ export class Config {
         }
     }
 
-    private static from_config(): Result<Config> {
-        const stream = Config.read();
-        if (stream.tag === 1) return stream;
-        return Config.parse_json(stream.value);
-    }
 
-    private static gio_file(): Result<any> {
-        try {
-            const conf = Gio.File.new_for_path(CONF_FILE);
-
-            if (!conf.query_exists(null)) {
-                const dir = Gio.File.new_for_path(CONF_DIR);
-                if (!dir.query_exists(null) && !dir.make_directory(null)) {
-                    return { tag: 1, why: 'failed to create pop-shell config directory' };
-                }
-
-                const example = new Config();
-                example.float.push({ class: 'pop-shell-example', title: 'pop-shell-example' });
-
-                conf.create(Gio.FileCreateFlags.NONE, null).write_all(JSON.stringify(example, undefined, 2), null);
-            }
-
-            return { tag: 0, value: conf };
-        } catch (why) {
-            return { tag: 1, why: `Gio.File I/O error: ${why}` };
-        }
-    }
-
-    private static read(): Result<string> {
-        try {
-            const file = Config.gio_file();
-            if (file.tag === 1) return file;
-
-            const [ok, buffer] = file.value.load_contents(null);
-            if (!ok) return { tag: 1, why: 'failed to read config contents' };
-
-            return { tag: 0, value: imports.byteArray.toString(buffer) };
-        } catch (why) {
-            return { tag: 1, why: `failed to read pop-shell config: ${why}` };
-        }
-    }
-
-    private static write(data: string): Result<null> {
-        try {
-            const file = Config.gio_file();
-            if (file.tag === 1) return file;
-
-            const [ok] = file.value.replace_contents(data, null, false, Gio.FileCreateFlags.NONE, null);
-            if (!ok) return { tag: 1, why: 'failed to replace config contents' };
-
-            return { tag: 0, value: null };
-        } catch (why) {
-            return { tag: 1, why: `failed to write to config: ${why}` };
-        }
-    }
-
-    sync_to_disk(): boolean {
-        const written = Config.write(this.to_json());
-        if (written.tag === 1) {
-            log(`pop-shell: failed to save config: ${written.why}`);
-            return false;
-        }
-        return true;
-    }
 }
 
 function set_to_json(_key: string, value: any) {

@@ -245,6 +245,9 @@ export class Ext extends Ecs.System<ExtEvent> {
     private exception_ipc: utils.AsyncIPC | null = null;
     private exception_generation: number = 0;
     private exception_select_timer: SignalID | null = null;
+    private exception_reload_tokens: Set<any> = new Set();
+    private config_requests: Set<any> = new Set();
+    private config_generation: number = 0;
 
     constructor() {
         const executor = new Executor.GLibExecutor<ExtEvent>();
@@ -253,10 +256,6 @@ export class Ext extends Ecs.System<ExtEvent> {
 
         this.load_settings();
         this.reload_theme();
-
-        this.register_fn(() => load_theme(this.current_style));
-
-        this.conf.reload();
 
         this.dbus.FocusUp = () => this.focus_up();
         this.dbus.FocusDown = () => this.focus_down();
@@ -440,6 +439,7 @@ export class Ext extends Ecs.System<ExtEvent> {
     }
 
     stop_window_io() {
+        this.stop_config_io();
         for (const window of this.windows.values()) window.cancel_decoration();
     }
 
@@ -532,31 +532,110 @@ export class Ext extends Ecs.System<ExtEvent> {
         ]);
     }
 
-    exception_add(win: Window.ShellWindow) {
-        this.exception_selecting = false;
-        let d = new add_exception.AddExceptionDialog(
-            // Cancel
-            () => this.exception_dialog(),
-            // this_app
-            () => {
-                let wmclass = win.meta.get_wm_class();
-                if (wmclass !== null && wmclass.length === 0) {
-                    wmclass = win.name(this);
-                }
+    stop_config_io() {
+        this.config_generation += 1;
+        this.conf.invalidate_load();
+        const requests = Array.from(this.config_requests);
+        this.config_requests.clear();
+        for (const request of requests) request.cancel();
+    }
 
-                if (wmclass) this.conf.add_app_exception(wmclass);
-                this.exception_dialog();
-            },
-            // current-window
-            () => {
-                let wmclass = win.meta.get_wm_class();
-                if (wmclass) this.conf.add_window_exception(wmclass, win.title());
-                this.exception_dialog();
-            },
-            // Reload the tiling config on dialog close
-            () => {
-                this.conf.reload();
+    private config_error(message: string): void {
+        try { Main.notifyError('Pop Shell configuration', message); }
+        catch (_) {
+            try { log.log(message); } catch (_) { }
+        }
+    }
+
+    private async reload_config_for_shell(valid: () => boolean = () => true,
+        owner: Set<any> | null = null): Promise<void> {
+        if (!this.events_enabled || !valid()) return;
+        const generation = this.config_generation;
+        const token = new Gio.Cancellable();
+        const current = () => this.events_enabled && generation === this.config_generation && !token.is_cancelled() && valid();
+        this.config_requests.add(token);
+        owner?.add(token);
+        try {
+            const result = await this.conf.reload_async(token);
+            if (!current()) return;
+            if (result.tag === 1) {
+                this.config_error(`Could not reload configuration: ${result.why}`);
+            } else if (result.value) {
                 this.tiling_config_reapply();
+            }
+        } catch (why) {
+            if (current()) this.config_error(`Could not reload configuration: ${why}`);
+        } finally {
+            this.config_requests.delete(token);
+            owner?.delete(token);
+        }
+    }
+
+    private async save_window_exception(win: Window.ShellWindow, all_windows: boolean,
+        generation: number): Promise<void> {
+        if (!this.events_enabled || generation !== this.config_generation) return;
+        const token = new Gio.Cancellable();
+        const current = () => this.events_enabled && generation === this.config_generation && !token.is_cancelled();
+        this.config_requests.add(token);
+        try {
+            let wmclass = win.meta.get_wm_class();
+            if (all_windows && wmclass === '') wmclass = win.name(this);
+            if (!wmclass) throw new Error('The selected window has no application class');
+            const result = all_windows
+                ? await this.conf.add_app_exception_async(wmclass, token)
+                : await this.conf.add_window_exception_async(wmclass, win.title(), token);
+            if (!current()) return;
+            if (result.tag === 1) {
+                const uncertain = result.persistence === 'unknown';
+                this.config_error(uncertain
+                    ? `The change may already have been saved. Reloading configuration. ${result.why}`
+                    : `Could not save the exception: ${result.why}`);
+                if (current() && uncertain) await this.reload_config_for_shell();
+                return;
+            }
+            if (!result.value.applied) {
+                const reloaded = await this.conf.reload_async(token);
+                if (!current()) return;
+                if (reloaded.tag === 1) {
+                    this.config_error(`The save completed, but configuration could not be reloaded: ${reloaded.why}`);
+                    return;
+                }
+                if (!reloaded.value) return;
+            }
+            this.tiling_config_reapply();
+            this.exception_dialog();
+        } catch (why) {
+            if (current()) this.config_error(`Could not complete the exception change: ${why}`);
+        } finally {
+            this.config_requests.delete(token);
+        }
+    }
+
+    exception_add(win: Window.ShellWindow) {
+        if (!this.events_enabled) return;
+        this.exception_selecting = false;
+        const generation = this.config_generation;
+        const current = () => this.events_enabled && generation === this.config_generation;
+        let handled = false;
+        const select = (all_windows: boolean) => {
+            if (handled || !current()) return;
+            handled = true;
+            void this.save_window_exception(win, all_windows, generation);
+        };
+        const d = new add_exception.AddExceptionDialog(
+            () => {
+                if (handled || !current()) return;
+                handled = true;
+                this.exception_dialog();
+            },
+            () => select(true),
+            () => select(false),
+            () => {
+                // Button actions close the modal immediately; do not race their save with a reload.
+                if (!handled && current()) {
+                    handled = true;
+                    void this.reload_config_for_shell();
+                }
             },
         );
         d.open();
@@ -564,6 +643,8 @@ export class Ext extends Ecs.System<ExtEvent> {
 
     stop_exception_dialog() {
         this.exception_generation += 1;
+        for (const token of this.exception_reload_tokens) token.cancel();
+        this.exception_reload_tokens.clear();
         const ipc = this.exception_ipc;
         this.exception_ipc = null;
         if (this.exception_select_timer !== null) {
@@ -587,10 +668,10 @@ export class Ext extends Ecs.System<ExtEvent> {
             if (!current()) return false;
             switch (line.trim()) {
                 case 'MODIFIED':
+                case 'RELOAD':
                     this.register_fn(() => {
                         if (!current()) return;
-                        this.conf.reload();
-                        this.tiling_config_reapply();
+                        void this.reload_config_for_shell(current, this.exception_reload_tokens);
                     });
                     break;
                 case 'SELECT':
@@ -2340,6 +2421,20 @@ export class Ext extends Ecs.System<ExtEvent> {
             }
 
             this.register_fn(() => (this.init = false));
+        } else {
+            this.queue_untracked_windows();
+        }
+    }
+
+    /** Discover windows created while disabled or waiting for the async startup load. */
+    queue_untracked_windows() {
+        for (const window of display.get_tab_list(Meta.TabList.NORMAL, null)) {
+            let id: number;
+            try { id = window.get_stable_sequence(); }
+            catch (_) { continue; }
+            if (this.ids.find(value => value === id).next().done) {
+                this.register({ tag: 3, window });
+            }
         }
     }
 
@@ -2924,6 +3019,19 @@ export class Ext extends Ecs.System<ExtEvent> {
 
 let ext: Ext | null = null;
 let indicator: Indicator | null = null;
+let startup_cancellable: any = null;
+let startup_generation = 0;
+let initialized = false;
+let activating = false;
+let chrome_added = false;
+
+function cancel_startup() {
+    startup_generation += 1;
+    const cancellable = startup_cancellable;
+    startup_cancellable = null;
+    ext?.conf.invalidate_load();
+    cancellable?.cancel();
+}
 
 declare global {
     var popShellExtension: any;
@@ -2934,26 +3042,73 @@ export default class PopShellExtension extends Extension {
         globalThis.popShellExtension = this;
         log.info('enable');
 
-        if (!ext) {
-            ext = new Ext();
-
-            ext.register_fn(() => {
-                if (ext?.auto_tiler) ext.snap_windows();
-            });
+        if (activating) return;
+        if (ext && initialized) {
+            ext.start_events();
+            ext.dbus.start();
+            if (ext.settings.show_skiptaskbar()) {
+                _show_skip_taskbar_windows(ext);
+            } else {
+                _hide_skip_taskbar_windows();
+            }
+            if (ext.was_locked) ext.was_locked = false;
+            return;
         }
 
+        cancel_startup();
+        if (!ext) ext = new Ext();
+        ext.stop_events();
+
+        const cancellable = new Gio.Cancellable();
+        startup_cancellable = cancellable;
+        void this.load_and_enable(ext, startup_generation, cancellable);
+    }
+
+    private async load_and_enable(target: Ext, generation: number, cancellable: any): Promise<void> {
+        const current = () => ext === target && startup_generation === generation &&
+            !cancellable.is_cancelled();
+        try {
+            const result = await target.conf.reload_async(cancellable);
+            if (!current()) return;
+            if (sessionMode.isLocked) {
+                cancel_startup();
+                return;
+            }
+            startup_cancellable = null;
+            if (result.tag === 1) {
+                log.error(`Configuration load failed; startup remains paused: ${result.why}`);
+                return;
+            }
+            if (!result.value) {
+                log.warn('Configuration load was superseded; startup remains paused');
+                return;
+            }
+            this.finish_enable(target);
+        } catch (why) {
+            if (!current()) return;
+            startup_cancellable = null;
+            log.error(`Extension startup failed: ${why}`);
+            // Roll back resources if synchronous activation failed partway through.
+            if (activating) {
+                try { this.disable(); }
+                catch (cleanup) { log.log(`Startup rollback failed: ${cleanup}`); }
+            }
+        }
+    }
+
+    private finish_enable(ext: Ext): void {
+        activating = true;
         ext.start_events();
+        ext.register_fn(() => load_theme(ext.current_style));
+        ext.register_fn(() => {
+            if (ext.auto_tiler) ext.snap_windows();
+        });
         ext.dbus.start();
 
         if (ext.settings.show_skiptaskbar()) {
             _show_skip_taskbar_windows(ext);
         } else {
             _hide_skip_taskbar_windows();
-        }
-
-        if (ext.was_locked) {
-            ext.was_locked = false;
-            return;
         }
 
         ext.injections_add();
@@ -2963,6 +3118,7 @@ export default class PopShellExtension extends Extension {
         disable_window_attention_handler();
 
         layoutManager.addChrome(ext.overlay);
+        chrome_added = true;
 
         if (!indicator) {
             indicator = new PanelSettings.Indicator(ext);
@@ -2974,28 +3130,40 @@ export default class PopShellExtension extends Extension {
         if (ext.settings.tile_by_default()) {
             ext.auto_tile_on();
         }
+        initialized = true;
+        activating = false;
     }
+
     disable() {
         log.info('disable');
 
         if (ext) {
-            if (sessionMode.isLocked) {
+            if (sessionMode.isLocked && initialized) {
                 ext.was_locked = true;
                 return;
             }
 
+            cancel_startup();
             ext.stop_events();
             ext.stop_exception_dialog();
             ext.stop_window_io();
 
             delete globalThis.popShellExtension;
+            if (!initialized && !activating) return;
+            initialized = false;
+            activating = false;
+            ext.was_locked = false;
+
             ext.injections_remove();
             ext.signals_remove();
             ext.dbus.destroy();
             ext.exit_modes();
             ext.hide_all_borders();
 
-            layoutManager.removeChrome(ext.overlay);
+            if (chrome_added) {
+                layoutManager.removeChrome(ext.overlay);
+                chrome_added = false;
+            }
 
             ext.keybindings.disable(ext.keybindings.global).disable(ext.keybindings.window_focus);
 

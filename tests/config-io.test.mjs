@@ -287,3 +287,15 @@ test('Unicode survives both first creation and ETag-protected replacement', asyn
     assert.equal((await file.update(() => second)).text, second);
     assert.equal((await file.load()).text, second); clean();
 });
+
+test('unchanged null keeps an absent configuration absent', async () => {
+    reset(); const snapshot = await store().update(current => current);
+    assert.deepEqual(snapshot, { text: null, etag: null });
+    assert.equal(disk.has(filename), false); assert.equal(records.moves, 0); clean();
+});
+
+test('null cannot erase an existing configuration', async () => {
+    reset(); existing();
+    await assert.rejects(store().update(() => null), /must return text/);
+    assert.equal(disk.get(filename).text, '{"count":0}'); assert.equal(records.replaces, 0); clean();
+});

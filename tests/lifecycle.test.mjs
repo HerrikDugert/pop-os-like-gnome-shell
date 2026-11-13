@@ -48,7 +48,7 @@ test('repeated stop and start preserve the gate state', () => {
 
 test('regular disable stops events before teardown but lock branch returns first', () => {
     const body = source.slice(source.indexOf('    disable() {', source.indexOf('export default class PopShellExtension')));
-    assert.match(body, /if \(sessionMode.isLocked\) \{\s*ext.was_locked = true;\s*return;\s*\}\s*ext.stop_events\(\);/);
+    assert.match(body, /if \(sessionMode.isLocked && initialized\) \{\s*ext.was_locked = true;\s*return;\s*\}\s*cancel_startup\(\);\s*ext.stop_events\(\);/);
     assert.ok(body.indexOf('ext.stop_events();') < body.indexOf('ext.signals_remove();'));
 });
 

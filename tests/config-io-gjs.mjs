@@ -15,6 +15,8 @@ async function run() {
         const file = root.get_child('config.json');
         const store = new AsyncConfigStore(file.get_path());
         check((await store.load()).text === null, 'new config should be absent');
+        const absent = await store.update(text => text);
+        check(absent.text === null && !file.query_exists(null), 'no-op created a configuration file');
         const title = 'Grüße — 日本語';
         const first = await store.update(() => JSON.stringify({ count: 1, title }));
         check(JSON.parse(first.text).count === 1, 'first creation failed');

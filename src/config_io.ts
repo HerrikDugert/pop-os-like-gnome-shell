@@ -69,8 +69,8 @@ export class AsyncConfigStore {
         }
     }
 
-    /** Transform is synchronous and must be pure: it may be retried after an external edit. */
-    update(transform: (current: string | null) => string, cancellable: any = null): Promise<ConfigSnapshot> {
+    /** Pure synchronous transform; retried on conflict. Returning unchanged null preserves absence. */
+    update(transform: (current: string | null) => string | null, cancellable: any = null): Promise<ConfigSnapshot> {
         const execute = () => this.locked_update(transform, cancellable);
         const pending = this.tail.then(execute, execute);
         this.tail = pending.then(() => undefined, () => undefined);
@@ -95,7 +95,7 @@ export class AsyncConfigStore {
         if (cancellable?.is_cancelled()) throw new Error('Configuration operation cancelled');
     }
 
-    private async locked_update(transform: (current: string | null) => string,
+    private async locked_update(transform: (current: string | null) => string | null,
         cancellable: any): Promise<ConfigSnapshot> {
         this.check_cancelled(cancellable);
         const dir = this.file.get_parent();
@@ -118,8 +118,8 @@ export class AsyncConfigStore {
                 this.check_cancelled(cancellable);
                 const before = await this.load(cancellable);
                 const text = transform(before.text);
-                if (typeof text !== 'string') throw new Error('Configuration transform must return text');
                 if (text === before.text) return before;
+                if (typeof text !== 'string') throw new Error('Configuration transform must return text');
                 try { return await this.replace(text, before, dir, cancellable); }
                 catch (error) {
                     if (!(error instanceof ConfigConflictError) || attempt === 2) throw error;

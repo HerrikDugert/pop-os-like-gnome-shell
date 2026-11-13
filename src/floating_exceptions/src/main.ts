@@ -122,6 +122,11 @@ export class MainView implements View {
         this.widget.add(list_frame);
     }
 
+    clear_rules() {
+        // The first row is the persistent system-exceptions navigation button.
+        for (const row of this.list.get_children().slice(1)) row.destroy();
+    }
+
     add_rule(wmclass: string | undefined, wmtitle: string | undefined, match: config.MatchMode) {
         const text = wmtitle === undefined ? wmclass : `${wmclass} / ${wmtitle}`;
         let label = Gtk.Label.new(`[${match === 'exact' ? 'Exact' : 'Regex'}] ${text}`);
@@ -140,7 +145,6 @@ export class MainView implements View {
         widget.show_all();
 
         button.connect('clicked', () => {
-            widget.destroy();
             this.callback({ tag: 3, wmclass, wmtitle, match });
         });
 
@@ -182,6 +186,10 @@ export class ExceptionsView implements View {
         this.widget.add(exceptions_frame);
     }
 
+    clear_rules() {
+        for (const row of this.exceptions.get_children()) row.destroy();
+    }
+
     add_rule(wmclass: string | undefined, wmtitle: string | undefined, enabled: boolean) {
         let label = Gtk.Label.new(wmtitle === undefined ? wmclass : `${wmclass} / ${wmtitle}`);
         label.set_xalign(0);
@@ -190,9 +198,11 @@ export class ExceptionsView implements View {
 
         let button = Gtk.Switch.new();
         button.set_valign(Gtk.Align.CENTER);
+        button.set_active(enabled);
         button.set_state(enabled);
-        button.connect('notify::state', () => {
-            this.callback({ tag: 2, wmclass, wmtitle, enable: button.get_state() });
+        button.connect('state-set', (_button: any, requested: boolean) => {
+            this.callback({ tag: 2, wmclass, wmtitle, enable: requested });
+            return true;
         });
 
         let widget = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 24);
@@ -208,95 +218,194 @@ export class ExceptionsView implements View {
 class App {
     main_view: MainView = new MainView();
     exceptions_view: ExceptionsView = new ExceptionsView();
-
     stack: any = Gtk.Stack.new();
     window: any;
     config: config.Config = new config.Config();
+    private back: any;
+    private error_box: any;
+    private error_label: any;
+    private retry: any;
+    private ready = false;
+    private busy = false;
+    private closing = false;
+    private active: any = null;
+    private pending: Promise<void> | null = null;
 
     constructor() {
         this.stack.set_border_width(16);
         this.stack.add(this.main_view.widget);
         this.stack.add(this.exceptions_view.widget);
-
-        let back = Gtk.Button.new_from_icon_name('go-previous-symbolic', Gtk.IconSize.BUTTON);
-
+        this.back = Gtk.Button.new_from_icon_name('go-previous-symbolic', Gtk.IconSize.BUTTON);
         const TITLE = 'Floating Window Exceptions';
-
-        let win = new Gtk.Dialog({ use_header_bar: true });
-        let headerbar = win.get_header_bar();
+        const win = new Gtk.Dialog({ use_header_bar: true });
+        this.window = win;
+        const headerbar = win.get_header_bar();
         headerbar.set_show_close_button(true);
         headerbar.set_title(TITLE);
-        headerbar.pack_start(back);
-
+        headerbar.pack_start(this.back);
         Gtk.Window.set_default_icon_name('application-default');
-
         win.set_wmclass(WM_CLASS_ID, TITLE);
-
         win.set_default_size(550, 700);
         win.get_content_area().add(this.stack);
+
+        this.error_label = Gtk.Label.new('');
+        this.error_label.set_line_wrap(true);
+        this.error_label.set_max_width_chars(55);
+        this.error_label.set_selectable(true);
+        this.retry = Gtk.Button.new_with_label('Reload configuration');
+        this.retry.connect('clicked', () => this.load_config());
+        this.error_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 6);
+        this.error_box.set_border_width(12);
+        this.error_box.add(this.error_label);
+        this.error_box.add(this.retry);
+        win.get_content_area().add(this.error_box);
+        win.connect('delete-event', () => { this.close(); return true; });
+        win.connect('destroy', () => this.close());
+        this.main_view.callback = event => this.handle_event(event);
+        this.exceptions_view.callback = event => this.handle_event(event);
+        this.back.connect('clicked', () => this.handle_event({ tag: 1, view: ViewNum.MainView }));
         win.show_all();
-        win.connect('delete-event', () => Gtk.main_quit());
+        this.back.hide();
+        this.error_box.hide();
+        this.load_config();
+    }
 
-        back.hide();
+    private update_controls(): void {
+        const enabled = this.ready && !this.busy && !this.closing;
+        this.stack.set_sensitive(enabled);
+        this.back.set_sensitive(enabled);
+        this.retry.set_sensitive(!this.busy && !this.closing);
+    }
 
-        this.config.reload();
+    private show_error(message: string): void {
+        if (this.closing) return;
+        this.error_label.set_text(message);
+        this.error_box.show_all();
+    }
 
+    private render(): void {
+        this.main_view.clear_rules();
+        this.exceptions_view.clear_rules();
         for (const value of config.DEFAULT_FLOAT_RULES.values()) {
-            let wmtitle = value.title ?? undefined;
-            let wmclass = value.class ?? undefined;
-
-            let disabled = this.config.rule_disabled({ class: wmclass, title: wmtitle });
+            const wmtitle = value.title ?? undefined;
+            const wmclass = value.class ?? undefined;
+            const disabled = this.config.rule_disabled({ class: wmclass, title: wmtitle });
             this.exceptions_view.add_rule(wmclass, wmtitle, !disabled);
         }
-
         for (const value of Array.from<any>(this.config.float)) {
-            let wmtitle = value.title ?? undefined;
-            let wmclass = value.class ?? undefined;
+            const wmtitle = value.title ?? undefined;
+            const wmclass = value.class ?? undefined;
             if (!value.disabled) this.main_view.add_rule(wmclass, wmtitle, config.rule_mode(value));
         }
+    }
 
-        let event_handler = (event: Event) => {
-            switch (event.tag) {
-                // SelectWindow
-                case 0:
-                    println('SELECT');
-                    Gtk.main_quit();
-                    break;
-
-                // SwitchTo
-                case 1:
-                    switch (event.view) {
-                        case ViewNum.MainView:
-                            this.stack.set_visible_child(this.main_view.widget);
-                            back.hide();
-                            break;
-                        case ViewNum.Exceptions:
-                            this.stack.set_visible_child(this.exceptions_view.widget);
-                            back.show();
-                            break;
-                    }
-
-                    break;
-
-                // ToggleException
-                case 2:
-                    log(`toggling exception ${event.enable}`);
-                    this.config.toggle_system_exception(event.wmclass, event.wmtitle, !event.enable);
-                    println('MODIFIED');
-                    break;
-
-                // RemoveException
-                case 3:
-                    log(`removing exception`);
-                    this.config.remove_user_exception(event.wmclass, event.wmtitle, event.match);
-                    println('MODIFIED');
-                    break;
+    private run_job(action: (token: any) => Promise<void>): void {
+        if (this.busy || this.closing) return;
+        this.busy = true;
+        this.error_box.hide();
+        this.update_controls();
+        const token = new Gio.Cancellable();
+        this.active = token;
+        this.pending = (async () => {
+            try { await action(token); }
+            catch (why) {
+                try { println('RELOAD'); } catch (_) { }
+                if (!this.closing) {
+                    this.ready = false;
+                    this.render();
+                    this.show_error(`Could not complete the operation. The file may already have changed. ${why}`);
+                }
+            } finally {
+                this.active = null;
+                this.pending = null;
+                this.busy = false;
+                if (this.closing) Gtk.main_quit();
+                else this.update_controls();
             }
-        };
+        })();
+        void this.pending.catch(why => {
+            try { log(`Floating exceptions UI failure: ${why}`); } catch (_) { }
+        });
+    }
 
-        this.main_view.callback = event_handler;
-        this.exceptions_view.callback = event_handler;
-        back.connect('clicked', () => event_handler({ tag: 1, view: ViewNum.MainView }));
+    private load_config(): void {
+        if (this.busy || this.closing) return;
+        this.ready = false;
+        this.run_job(async token => {
+            const result = await this.config.reload_async(token);
+            if (this.closing) return;
+            this.ready = result.tag === 0 && result.value;
+            if (this.ready) this.render();
+            else this.show_error(result.tag === 1 ? result.why : 'Configuration load was superseded. Reload to retry.');
+        });
+    }
+
+    private mutate(event: ToggleException | RemoveException): void {
+        this.run_job(async token => {
+            const result = event.tag === 2
+                ? await this.config.toggle_system_exception_async(event.wmclass, event.wmtitle, !event.enable, token)
+                : await this.config.remove_user_exception_async(event.wmclass, event.wmtitle, event.match, token);
+            // Protocol notifications are not UI success messages. RELOAD means persistence is uncertain.
+            if (result.tag === 0) println('MODIFIED');
+            else if (result.persistence === 'unknown') println('RELOAD');
+            if (this.closing) return;
+            if (result.tag === 1) {
+                if (result.persistence === 'unknown') {
+                    const recovered = await this.config.reload_async(token);
+                    if (this.closing) return;
+                    this.ready = recovered.tag === 0 && recovered.value;
+                    this.render();
+                    const detail = recovered.tag === 1 ? ` Reload failed: ${recovered.why}` : '';
+                    this.show_error(`The change may already have been saved. ${result.why}${detail}`);
+                } else {
+                    this.render();
+                    this.show_error(`The save did not start. ${result.why}`);
+                }
+                return;
+            }
+            if (!result.value.applied) {
+                const recovered = await this.config.reload_async(token);
+                if (this.closing) return;
+                this.ready = recovered.tag === 0 && recovered.value;
+                if (!this.ready) this.show_error(recovered.tag === 1
+                    ? `Save completed, but reload failed: ${recovered.why}`
+                    : 'Save completed, but reload was superseded. Reload to retry.');
+            }
+            this.render();
+        });
+    }
+
+    private handle_event(event: Event): void {
+        if (!this.ready || this.busy || this.closing) return;
+        switch (event.tag) {
+            case 0:
+                println('SELECT');
+                this.close();
+                break;
+            case 1:
+                if (event.view === ViewNum.MainView) {
+                    this.stack.set_visible_child(this.main_view.widget);
+                    this.back.hide();
+                } else {
+                    this.stack.set_visible_child(this.exceptions_view.widget);
+                    this.back.show();
+                }
+                break;
+            case 2:
+            case 3:
+                this.mutate(event);
+                break;
+        }
+    }
+
+    private close(): void {
+        if (this.closing) return;
+        this.closing = true;
+        this.config.invalidate_load();
+        this.active?.cancel();
+        try { this.window.hide(); } catch (_) { }
+        // Keep GTK's loop alive until cancellation and owned lock/temp cleanup finish.
+        if (!this.pending) Gtk.main_quit();
     }
 }
 

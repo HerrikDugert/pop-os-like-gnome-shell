@@ -233,8 +233,10 @@ function fixture() {
         exception_ipc = null;
         exception_select_timer = null;
         exception_selecting = false;
+        exception_reload_tokens = new Set();
         conf = { reload: () => { this.reloaded++; } };
         reloaded = 0;
+        reload_config_for_shell(valid) { if (valid()) this.reloaded++; }
         tiling_config_reapply() {}
         register_fn(callback) { queued.push(callback); }
         ${methods}
@@ -290,7 +292,7 @@ test('disabled extension does not spawn or schedule selection', () => {
 
 test('regular disable disposes IPC after stopping events; lock early return remains', () => {
     const body = extension.slice(extension.indexOf('    disable() {', extension.indexOf('export default class PopShellExtension')));
-    assert.match(body, /if \(sessionMode.isLocked\) \{\s*ext.was_locked = true;\s*return;\s*\}\s*ext.stop_events\(\);\s*ext.stop_exception_dialog\(\);/);
+    assert.match(body, /if \(sessionMode.isLocked && initialized\) \{\s*ext.was_locked = true;\s*return;\s*\}\s*cancel_startup\(\);\s*ext.stop_events\(\);\s*ext.stop_exception_dialog\(\);/);
 });
 
 test('stale selection callback cannot erase a newer timer', () => {
@@ -319,4 +321,17 @@ test('EOF before process exit retains lifecycle ownership until exit or explicit
     assert.equal(closed, 0);
     ipc.dispose(); flush();
     assert.equal(records.kills, 1); assert.equal(closed, 1); assert.equal(records.closes, 2);
+});
+
+test('RELOAD requests an owned async refresh without claiming save success', () => {
+    reset(); const { instance, handles, queued } = fixture();
+    instance.exception_dialog(); assert.equal(handles[0].line('RELOAD'), true);
+    assert.equal(instance.reloaded, 0); queued.shift()(); assert.equal(instance.reloaded, 1);
+});
+
+test('a queued RELOAD from an old dialog is discarded', () => {
+    reset(); const { instance, handles, queued } = fixture();
+    instance.exception_dialog(); handles[0].line('RELOAD');
+    instance.stop_exception_dialog(); instance.exception_dialog();
+    queued.shift()(); assert.equal(instance.reloaded, 0);
 });

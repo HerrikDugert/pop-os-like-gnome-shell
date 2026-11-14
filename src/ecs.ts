@@ -11,8 +11,29 @@ export function entity_new(pos: number, gen: number): Entity {
     return [pos, gen];
 }
 
+export class StaleEntityError extends Error {
+    constructor() {
+        super('Invalid or stale entity');
+        this.name = 'StaleEntityError';
+    }
+}
+
 export class Storage<T> {
     private store: Array<[number, T] | null> = [];
+    private generations: Array<number | undefined> = [];
+
+    constructor(private alive: ((entity: Entity) => boolean) | null = null) {}
+
+    private assert_writable(entity: Entity): void {
+        if (!Array.isArray(entity) || entity.length !== 2 ||
+            !Number.isSafeInteger(entity[0]) || entity[0] < 0 || entity[0] > 0xfffffffe ||
+            !Number.isSafeInteger(entity[1]) || entity[1] < 0) {
+            throw new StaleEntityError();
+        }
+        if (this.alive && !this.alive(entity)) throw new StaleEntityError();
+        const generation = this.generations[entity[0]];
+        if (generation !== undefined && entity[1] < generation) throw new StaleEntityError();
+    }
 
     *_iter(): IterableIterator<[number, [number, T]]> {
         for (let idx = 0; idx < this.store.length; idx++) {
@@ -48,14 +69,22 @@ export class Storage<T> {
     }
 
     get_or(entity: Entity, init: () => T): T {
+        this.assert_writable(entity);
         const slot = this.store[entity[0]];
         if (slot != null && slot[0] === entity[1]) return slot[1];
+        // The initializer may mutate the caller's tuple or reenter the ECS.
+        const expected = entity_new(entity[0], entity[1]);
         const value = init();
-        this.insert(entity, value);
+        this.assert_writable(expected);
+        const current = this.store[expected[0]];
+        if (current != null && current[0] === expected[1]) return current[1];
+        this.insert(expected, value);
         return value;
     }
 
     insert(entity: Entity, component: T) {
+        this.assert_writable(entity);
+        this.generations[entity[0]] = entity[1];
         this.store[entity[0]] = [entity[1], component];
     }
 
@@ -152,7 +181,7 @@ export class World {
     }
 
     register_storage<T>(): Storage<T> {
-        const storage = new Storage<T>();
+        const storage = new Storage<T>(entity => this.is_alive(entity));
         this.storages.push(storage);
         return storage;
     }

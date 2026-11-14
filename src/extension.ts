@@ -242,6 +242,8 @@ export class Ext extends Ecs.System<ExtEvent> {
 
     private event_executor: Executor.GLibExecutor<ExtEvent>;
     private events_enabled: boolean = true;
+    private event_generation: number = 0;
+    private idle_sources: Map<SignalID, object> = new Map();
     private exception_ipc: utils.AsyncIPC | null = null;
     private exception_generation: number = 0;
     private exception_select_timer: SignalID | null = null;
@@ -296,7 +298,16 @@ export class Ext extends Ecs.System<ExtEvent> {
     /** Reject late registrations before removing the current mainloop source. */
     stop_events() {
         this.events_enabled = false;
+        this.event_generation += 1;
         this.event_executor.stop();
+        const sources = Array.from(this.idle_sources.keys());
+        this.idle_sources.clear();
+        for (const source of sources) {
+            try { GLib.source_remove(source); }
+            catch (why) {
+                try { log.log(`Could not remove idle source: ${why}`); } catch (_) { }
+            }
+        }
     }
 
     register(event: ExtEvent): void {
@@ -2558,14 +2569,16 @@ export class Ext extends Ecs.System<ExtEvent> {
 
         const original = this.active_workspace();
 
-        let tiler = new auto_tiler.AutoTiler(
-            new Forest.Forest()
-                .connect_on_attach(this.on_tile_attach.bind(this))
-                .connect_on_detach(this.on_tile_detach.bind(this)),
-            this.register_storage(),
-        );
-
-        this.auto_tiler = tiler;
+        let tiler = this.auto_tiler;
+        if (!tiler) {
+            tiler = new auto_tiler.AutoTiler(
+                new Forest.Forest()
+                    .connect_on_attach(this.on_tile_attach.bind(this))
+                    .connect_on_detach(this.on_tile_detach.bind(this)),
+                this.register_storage(),
+            );
+            this.auto_tiler = tiler;
+        }
 
         this.settings.set_tile_by_default(true);
         this.button.icon.gicon = this.button_gio_icon_auto_on; // type: Gio.Icon
@@ -2586,13 +2599,33 @@ export class Ext extends Ecs.System<ExtEvent> {
 
     /** Calls a function once windows are no longer queued for movement. */
     schedule_idle(func: () => boolean): boolean {
-        if (!this.movements.is_empty()) {
-            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
-                if (!this.movements.is_empty()) return true;
-                return func();
-            });
+        if (!this.events_enabled) return false;
+        const generation = this.event_generation;
+        const current = () => this.events_enabled && generation === this.event_generation;
+        const invoke = () => {
+            if (!current()) return false;
+            try { return func(); }
+            catch (why) {
+                try { log.log(`Idle callback failed: ${why}`); } catch (_) { }
+                return false;
+            }
+        };
+        if (this.movements.is_empty()) {
+            invoke();
         } else {
-            func();
+            const request = {};
+            const signal = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+                if (this.idle_sources.get(signal) !== request) return false;
+                if (!current()) {
+                    this.idle_sources.delete(signal);
+                    return false;
+                }
+                if (!this.movements.is_empty()) return true;
+                const keep = invoke() && current() && this.idle_sources.get(signal) === request;
+                if (!keep && this.idle_sources.get(signal) === request) this.idle_sources.delete(signal);
+                return keep;
+            });
+            this.idle_sources.set(signal, request);
         }
         return false;
     }
@@ -3168,6 +3201,7 @@ export default class PopShellExtension extends Extension {
             ext.keybindings.disable(ext.keybindings.global).disable(ext.keybindings.window_focus);
 
             if (ext.auto_tiler) {
+                ext.unregister_storage(ext.auto_tiler.attached);
                 ext.auto_tiler.destroy(ext);
                 ext.auto_tiler = null;
             }

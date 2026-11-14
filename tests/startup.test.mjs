@@ -63,7 +63,8 @@ function fixture(options = {}) {
         exit_modes() { trace.push('modes.exit'); }
         hide_all_borders() { trace.push('borders.hide'); }
         snap_windows() { trace.push('windows.snap'); }
-        auto_tile_on() { trace.push('tiling.on'); this.auto_tiler = { destroy: record('tiling.destroy') }; }
+        unregister_storage(storage) { assert.ok(storage); trace.push('storage.unregister'); }
+        auto_tile_on() { trace.push('tiling.on'); this.auto_tiler = { attached: {}, destroy: record('tiling.destroy') }; }
     }
     class Indicator {
         constructor() { this.button = {}; trace.push('indicator.create'); }
@@ -172,9 +173,10 @@ test('a repeated enable during loading cancels the older startup', async () => {
 test('regular disable tears down an activated extension', async () => {
     const f = fixture(); f.extension.enable(); await f.finish(); f.extension.disable();
     assert.equal(f.state().initialized, false); assert.equal(f.state().chrome_added, false);
-    for (const name of ['signals.remove', 'dbus.destroy', 'chrome.remove', 'indicator.destroy', 'tiling.destroy']) {
+    for (const name of ['signals.remove', 'dbus.destroy', 'chrome.remove', 'indicator.destroy', 'tiling.destroy', 'storage.unregister']) {
         assert.equal(count(f, name), 1, name);
     }
+    assert.ok(f.trace.indexOf('storage.unregister') < f.trace.indexOf('tiling.destroy'));
     assert.ok(f.trace.indexOf('io.stop') < f.trace.indexOf('signals.remove'));
 });
 

@@ -11,12 +11,14 @@ class Base {
     constructor() { this.pending = []; }
     register(event) { this.pending.push(event); }
 }
-const Lifecycle = new Function('Base', `return class extends Base {
+const Lifecycle = new Function('Base', 'GLib', 'log', `return class extends Base {
     events_enabled = true;
+    event_generation = 0;
+    idle_sources = new Map();
     event_executor = { stop: () => { this.stops++; this.pending = []; } };
     stops = 0;
     ${methods}
-}`)(Base);
+}`)(Base, { source_remove() { throw new Error('Unexpected idle source'); } }, { log() {} });
 
 test('disable clears pending events and rejects late registrations', () => {
     const instance = new Lifecycle();

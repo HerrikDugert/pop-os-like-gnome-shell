@@ -18,6 +18,7 @@ import * as node from './node.js';
 import * as utils from './utils.js';
 import * as Executor from './executor.js';
 import { ExtensionTimers } from './extension_timers.js';
+import { FirstFrames } from './first_frames.js';
 import * as movement from './movement.js';
 import * as stack from './stack.js';
 import * as add_exception from './dialog_add_exception.js';
@@ -191,7 +192,7 @@ export class Ext extends Ecs.System<ExtEvent> {
     /** Set when a window is being moved by the mouse */
     moved_by_mouse: boolean = false;
 
-    private workareas_update: null | SignalID = null;
+    private workareas_request: object | null = null;
 
     /** Record of misc. global objects and their attached signals */
     private signals: Map<GObject.Object, Array<SignalID>> = new Map();
@@ -243,6 +244,12 @@ export class Ext extends Ecs.System<ExtEvent> {
     private events_enabled: boolean = true;
     private event_generation: number = 0;
     private idle_sources: Map<SignalID, object> = new Map();
+    private first_frames = new FirstFrames({
+        add: (priority, delay, callback) => GLib.timeout_add(priority, delay, callback),
+        remove: source => { GLib.source_remove(source); },
+    }, () => this.events_enabled, () => this.event_generation, why => {
+        try { log.log(`First-frame callback failed: ${why}`); } catch (_) { }
+    });
     private extension_timers = new ExtensionTimers({
         add: (priority, delay, callback) => GLib.timeout_add(priority, delay, callback),
         remove: source => { GLib.source_remove(source); },
@@ -462,6 +469,8 @@ export class Ext extends Ecs.System<ExtEvent> {
     stop_window_io() {
         this.stop_config_io();
         this.extension_timers.stop();
+        this.workareas_request = null;
+        this.first_frames.stop();
         for (const window of this.windows.values()) {
             window.stop_ui_work();
             window.cancel_decoration();
@@ -2657,15 +2666,32 @@ export class Ext extends Ecs.System<ExtEvent> {
     update_display_configuration_before() { }
 
     update_display_configuration(workareas_only: boolean) {
-        if (!this.auto_tiler || sessionMode.isLocked) return;
+        if (!this.events_enabled || !this.auto_tiler || sessionMode.isLocked) {
+            this.workareas_request = null;
+            this.extension_timers.cancel('display-workareas');
+            return;
+        }
 
         if (this.ignore_display_update) {
             this.ignore_display_update = false;
             return;
         }
 
+        // Revoke both a native retry and any already queued continuation.
+        this.workareas_request = null;
+        this.extension_timers.cancel('display-workareas');
+
         // Ignore the update if there are no monitors to assign to
         if (layoutManager.monitors.length === 0) return;
+
+        const retry_tiler = this.auto_tiler;
+        const retry_forest = retry_tiler.forest;
+        const generation = this.event_generation;
+        const request = {};
+        this.workareas_request = request;
+        const retry_current = () => this.workareas_request === request && this.events_enabled &&
+            generation === this.event_generation && this.auto_tiler === retry_tiler &&
+            retry_tiler.forest === retry_forest && !sessionMode.isLocked && layoutManager.monitors.length > 0;
 
         const primary_display = global.display.get_primary_monitor();
 
@@ -2696,17 +2722,14 @@ export class Ext extends Ecs.System<ExtEvent> {
 
         if (!displays_ready() || !primary_display_ready(this)) {
             if (this.displays_updating !== null) return;
-            if (this.workareas_update !== null) GLib.source_remove(this.workareas_update);
-
-            this.workareas_update = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
+            this.extension_timers.schedule('display-workareas', GLib.PRIORITY_DEFAULT, 500, () => {
                 this.register_fn(() => {
+                    if (!retry_current()) return;
+                    this.workareas_request = null;
                     this.update_display_configuration(workareas_only);
                 });
-
-                this.workareas_update = null;
-
                 return false;
-            });
+            }, retry_current);
 
             return;
         }
@@ -2816,10 +2839,8 @@ export class Ext extends Ecs.System<ExtEvent> {
 
         if (this.displays_updating !== null) GLib.source_remove(this.displays_updating);
 
-        if (this.workareas_update !== null) {
-            GLib.source_remove(this.workareas_update);
-            this.workareas_update = null;
-        }
+        this.workareas_request = null;
+        this.extension_timers.cancel('display-workareas');
 
         // Delay actions in case of temporary connection loss
         this.displays_updating = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 2000, () => {
@@ -2948,51 +2969,31 @@ export class Ext extends Ecs.System<ExtEvent> {
             win.update_decoration(this);
             this.monitors.insert(entity, [win.meta.get_monitor(), win.workspace_id()]);
 
-            const grab_focus = () => {
+            const grab_focus = (valid: () => boolean = () => true) => {
                 this.schedule_idle(() => {
                     this.windows.with(entity, (window) => {
+                        const current = () => valid() && this.windows.get(win.entity) === win && win.actor_exists();
+                        if (window !== win || !current()) return;
                         window.meta.raise();
+                        if (!current()) return;
                         window.meta.unminimize();
-                        window.activate(false);
+                        if (current()) window.activate(false);
                     });
-
                     return false;
                 });
             };
 
             if (this.auto_tiler && !win.meta.minimized && win.is_tilable(this)) {
-                let tiled = false;
-                let signal_id: number | null = null;
-                let timeout_id: number | null = null;
-
-                const tile = () => {
-                    if (tiled || !win.actor_exists()) return;
-                    tiled = true;
-
-                    if (timeout_id !== null) {
-                        GLib.source_remove(timeout_id);
-                        timeout_id = null;
-                    }
-
-                    if (signal_id !== null) {
-                        actor.disconnect(signal_id);
-                        signal_id = null;
-                    }
-
-                    this.auto_tiler?.auto_tile(this, win, this.init);
-                    grab_focus();
-                };
-
-                signal_id = actor.connect('first-frame', tile);
-
-                // `first-frame` may never fire in some environments (for
-                // example headless sessions where no frame is painted), so
-                // keep a short timeout as a fallback to ensure tiling.
-                timeout_id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 250, () => {
-                    timeout_id = null;
-                    tile();
-                    return GLib.SOURCE_REMOVE;
-                });
+                const tiler = this.auto_tiler;
+                const generation = this.event_generation;
+                const current = () => this.events_enabled && generation === this.event_generation &&
+                    this.auto_tiler === tiler && this.windows.get(win.entity) === win &&
+                    win.actor_exists() && win.meta.get_compositor_private() === actor &&
+                    !win.meta.minimized && win.is_tilable(this);
+                this.first_frames.arm(win.meta, actor, GLib.PRIORITY_DEFAULT, 250, () => {
+                    tiler.auto_tile(this, win, this.init);
+                    if (current()) grab_focus(current);
+                }, current);
             } else {
                 grab_focus();
             }

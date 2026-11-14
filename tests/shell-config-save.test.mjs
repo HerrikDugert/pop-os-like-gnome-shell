@@ -41,6 +41,7 @@ function fixture() {
         config_generation = 0;
         config_requests = new Set();
         extension_timers = { stop() {} };
+        first_frames = { stop() {} };
         exception_selecting = true;
         reopened = 0;
         reapplied = 0;

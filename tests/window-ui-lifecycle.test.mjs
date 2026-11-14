@@ -186,10 +186,10 @@ test('turning the hint setting off terminates an existing hint', () => {
 });
 test('regular window-I/O teardown calls UI cleanup before decoration cleanup', () => {
     const body = method(extension, 'stop_window_io'); const trace = [];
-    const owner = { extension_timers: { stop() { trace.push('timers'); } }, stop_config_io() { trace.push('config'); }, windows: { values: () => [{
+    const owner = { first_frames: { stop() { trace.push('frames'); } }, extension_timers: { stop() { trace.push('timers'); } }, stop_config_io() { trace.push('config'); }, windows: { values: () => [{
         stop_ui_work() { trace.push('ui'); }, cancel_decoration() { trace.push('decoration'); } }] } };
     new Function(`return ({ ${erase(body)} });`)().stop_window_io.call(owner);
-    assert.deepEqual(trace, ['config', 'timers', 'ui', 'decoration']);
+    assert.deepEqual(trace, ['config', 'timers', 'frames', 'ui', 'decoration']);
 });
 test('window destruction revokes UI work before decoration cleanup', () => {
     assert.match(method(extension, 'on_destroy'), /window.destroying = true;\s*this.extension_timers.cancel\(window.meta\);\s*window.stop_ui_work\(\);\s*window.cancel_decoration\(\);/);

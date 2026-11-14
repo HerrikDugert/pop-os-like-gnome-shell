@@ -150,6 +150,7 @@ function extensionFixture() {
         connect_size_signal(_win, signal, cb) { callbacks.set(signal, cb); return callbacks.size; },
         size_signals: { insert() {} }, register(event) { events.push(event); },
         stop_config_io() { trace.push('config'); },
+        first_frames: { stop() {} },
     };
     owner.extension_timers = new ExtensionTimers(f.backend, () => owner.events_enabled,
         () => owner.event_generation, error => f.errors.push(error));

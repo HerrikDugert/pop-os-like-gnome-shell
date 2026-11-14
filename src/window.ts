@@ -23,11 +23,27 @@ const { OnceCell } = once_cell;
 
 export var window_tracker = Shell.WindowTracker.get_default();
 
-/** Contains SourceID of a restack operation. Used to prevent multiple restacks. */
-let SCHEDULED_RESTACK: number | null = null;
+interface WindowUIRequest {
+    owner: ShellWindow;
+    source: SignalID | null;
+}
 
-/** Contains SourceID of an active hint operation. */
-let ACTIVE_HINT_SHOW_ID: number | null = null;
+// Keep cross-window coalescing, but give every request its own identity.
+let SCHEDULED_RESTACK: WindowUIRequest | null = null;
+let ACTIVE_HINT_SHOW_ID: WindowUIRequest | null = null;
+
+function report_ui_error(why: unknown): void {
+    try { log.log(`Window UI callback failed: ${why}`); } catch (_) { }
+}
+
+function cancel_ui_source(request: WindowUIRequest): void {
+    const source = request.source;
+    request.source = null;
+    if (source !== null) {
+        try { GLib.source_remove(source); }
+        catch (why) { report_ui_error(why); }
+    }
+}
 
 const WM_TITLE_BLACKLIST: Array<string> = [
     'Firefox',
@@ -413,47 +429,52 @@ export class ShellWindow {
     }
 
     show_border() {
-        if (!this.border) return;
-
+        const activation = this.ext.window_io_generation();
+        if (!this.ui_current(activation)) return;
         this.restack();
         this.update_border_style();
-        if (this.ext.settings.active_hint()) {
-            let border = this.border;
-
-            const sameMonitorCount = this.ext.active_window_list().filter((w) => !w.meta.minimized && w.meta.get_monitor() === this.meta.get_monitor()).length;
-
-            const permitted = () => {
-                return (
-                    this.actor_exists() &&
-                    this.ext.focus_window() == this &&
-                    !this.meta.is_fullscreen() &&
-                    (sameMonitorCount > 1 ||
-                    this.is_snap_edge() ||
-                    this.ext.settings.active_hint_show_on_maximized()) &&
-                    !this.meta.minimized
-                );
-            };
-
-            if (permitted()) {
-                border.show();
-
-                // Focus will be re-applied to fix windows moving across workspaces
-                let applications = 0;
-
-                // Ensure that the border is shown
-                if (ACTIVE_HINT_SHOW_ID !== null) GLib.source_remove(ACTIVE_HINT_SHOW_ID);
-                ACTIVE_HINT_SHOW_ID = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 600, () => {
-                    if ((applications > 4 && !this.same_workspace()) || !permitted()) {
-                        ACTIVE_HINT_SHOW_ID = null;
+        const border = this.border;
+        if (!border || !this.ext.settings.active_hint()) return;
+        const sameMonitorCount = this.ext.active_window_list().filter((w) =>
+            !w.meta.minimized && w.meta.get_monitor() === this.meta.get_monitor()).length;
+        const permitted = () => this.ui_current(activation) && this.border === border &&
+            this.ext.settings.active_hint() && this.ext.focus_window() === this &&
+            !this.meta.is_fullscreen() && !this.meta.minimized &&
+            (sameMonitorCount > 1 || this.is_snap_edge() || this.ext.settings.active_hint_show_on_maximized());
+        if (!permitted()) return;
+        border.show();
+        if (!permitted()) return;
+        let applications = 0;
+        const request: WindowUIRequest = { owner: this, source: null };
+        const owns = () => ACTIVE_HINT_SHOW_ID === request;
+        const release = () => {
+            if (owns()) ACTIVE_HINT_SHOW_ID = null;
+            request.source = null;
+        };
+        const previous = ACTIVE_HINT_SHOW_ID;
+        ACTIVE_HINT_SHOW_ID = request;
+        if (previous) cancel_ui_source(previous);
+        if (!owns() || !permitted()) { release(); return; }
+        try {
+            request.source = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 600, () => {
+                if (!owns()) return GLib.SOURCE_REMOVE;
+                try {
+                    if (!permitted() || (applications > 4 && !this.same_workspace())) {
+                        release();
                         return GLib.SOURCE_REMOVE;
                     }
-
                     applications += 1;
                     border.show();
-                    return GLib.SOURCE_CONTINUE;
-                });
-            }
-        }
+                    const keep = owns() && permitted();
+                    if (!keep) release();
+                    return keep;
+                } catch (why) {
+                    release();
+                    report_ui_error(why);
+                    return GLib.SOURCE_REMOVE;
+                }
+            });
+        } catch (why) { release(); report_ui_error(why); }
     }
 
     same_workspace() {
@@ -474,6 +495,9 @@ export class ShellWindow {
      * @param updateState NORMAL, RAISED, WORKSPACE_CHANGED
      */
     restack(updateState: RESTACK_STATE = RESTACK_STATE.NORMAL) {
+        const activation = this.ext.window_io_generation();
+        if (!this.ext.allows_window_io() || !this.actor_exists() || !this.border) return;
+        const expected_border = this.border;
         this.update_border_layout();
         const sameMonitorCount = this.ext.active_window_list().filter((w) => !w.meta.minimized && w.meta.get_monitor() === this.meta.get_monitor()).length;
         if (
@@ -501,59 +525,78 @@ export class ShellWindow {
         }
 
         let restacks = 0;
-
+        const request: WindowUIRequest = { owner: this, source: null };
+        const owns = () => SCHEDULED_RESTACK === request;
+        const current = () => this.ui_current(activation) && this.border === expected_border;
+        const release = () => {
+            if (owns()) SCHEDULED_RESTACK = null;
+            request.source = null;
+        };
         const action = () => {
-            const count = restacks;
-            restacks += 1;
+            if (!owns()) return GLib.SOURCE_REMOVE;
+            try {
+                if (!current()) { release(); return GLib.SOURCE_REMOVE; }
+                const border = this.border;
+                const actor = this.meta.get_compositor_private();
+                const win_group = global.window_group;
 
-            if (!this.actor_exists && count === 0) return true;
+                if (actor && border && win_group) {
+                    this.update_border_layout();
+                    if (!owns() || !current()) { release(); return GLib.SOURCE_REMOVE; }
+                    // move the border above the window group first
+                    if (!owns() || !current()) { release(); return GLib.SOURCE_REMOVE; }
+                    win_group.set_child_above_sibling(border, null);
+                    if (!owns() || !current()) { release(); return GLib.SOURCE_REMOVE; }
 
-            if (count === 3) {
-                if (SCHEDULED_RESTACK !== null) GLib.source_remove(SCHEDULED_RESTACK);
-                SCHEDULED_RESTACK = null;
-            }
-
-            const border = this.border;
-            const actor = this.meta.get_compositor_private();
-            const win_group = global.window_group;
-
-            if (actor && border && win_group) {
-                this.update_border_layout();
-                // move the border above the window group first
-                win_group.set_child_above_sibling(border, null);
-
-                if (this.always_top_windows.length > 0) {
-                    // honor the always-top windows
-                    for (const above_actor of this.always_top_windows) {
-                        if (actor != above_actor) {
-                            if (border.get_parent() === above_actor.get_parent()) {
-                                win_group.set_child_below_sibling(border, above_actor);
+                    if (this.always_top_windows.length > 0) {
+                        // honor the always-top windows
+                        for (const above_actor of this.always_top_windows) {
+                            if (actor != above_actor) {
+                                if (border.get_parent() === above_actor.get_parent()) {
+                                    if (!owns() || !current()) { release(); return GLib.SOURCE_REMOVE; }
+                                    win_group.set_child_below_sibling(border, above_actor);
+                                    if (!owns() || !current()) { release(); return GLib.SOURCE_REMOVE; }
+                                }
                             }
+                        }
+
+                        // Move the border above the current window actor
+                        if (border.get_parent() === actor.get_parent()) {
+                            if (!owns() || !current()) { release(); return GLib.SOURCE_REMOVE; }
+                            win_group.set_child_above_sibling(border, actor);
+                            if (!owns() || !current()) { release(); return GLib.SOURCE_REMOVE; }
                         }
                     }
 
-                    // Move the border above the current window actor
-                    if (border.get_parent() === actor.get_parent()) {
-                        win_group.set_child_above_sibling(border, actor);
+                    // Honor transient windows
+                    for (const window of this.ext.windows.values()) {
+                        const parent = window.meta.get_transient_for();
+                        const window_actor = window.meta.get_compositor_private();
+                        if (!parent || !window_actor) continue;
+                        const parent_actor = parent.get_compositor_private();
+                        if (!parent_actor && parent_actor !== actor) continue;
+                        if (!owns() || !current()) { release(); return GLib.SOURCE_REMOVE; }
+                        win_group.set_child_below_sibling(border, window_actor);
+                        if (!owns() || !current()) { release(); return GLib.SOURCE_REMOVE; }
                     }
                 }
-
-                // Honor transient windows
-                for (const window of this.ext.windows.values()) {
-                    const parent = window.meta.get_transient_for();
-                    const window_actor = window.meta.get_compositor_private();
-                    if (!parent || !window_actor) continue;
-                    const parent_actor = parent.get_compositor_private();
-                    if (!parent_actor && parent_actor !== actor) continue;
-                    win_group.set_child_below_sibling(border, window_actor);
-                }
+                restacks += 1;
+                const keep = restacks < 4 && owns() && current();
+                if (!keep) release();
+                return keep;
+            } catch (why) {
+                release();
+                report_ui_error(why);
+                return GLib.SOURCE_REMOVE;
             }
-
-            return true;
         };
-
-        if (SCHEDULED_RESTACK !== null) GLib.source_remove(SCHEDULED_RESTACK);
-        SCHEDULED_RESTACK = GLib.timeout_add(GLib.PRIORITY_LOW, restackSpeed, action);
+        const previous = SCHEDULED_RESTACK;
+        SCHEDULED_RESTACK = request;
+        if (previous) cancel_ui_source(previous);
+        if (!owns() || activation !== this.ext.window_io_generation() ||
+            !this.ext.allows_window_io() || !this.actor_exists()) { release(); return; }
+        try { request.source = GLib.timeout_add(GLib.PRIORITY_LOW, restackSpeed, action); }
+        catch (why) { release(); report_ui_error(why); }
     }
 
     get always_top_windows(): Clutter.Actor[] {
@@ -566,7 +609,27 @@ export class ShellWindow {
         return above_windows;
     }
 
+    private ui_current(activation: number): boolean {
+        return activation === this.ext.window_io_generation() && this.ext.allows_window_io() &&
+            this.actor_exists() && this.border !== null && this.ext.windows.get(this.entity) === this;
+    }
+
+    /** Revoke UI work before native resources or the activation are torn down. */
+    stop_ui_work(): void {
+        const restack = SCHEDULED_RESTACK?.owner === this ? SCHEDULED_RESTACK : null;
+        const hint = ACTIVE_HINT_SHOW_ID?.owner === this ? ACTIVE_HINT_SHOW_ID : null;
+        if (restack) SCHEDULED_RESTACK = null;
+        if (hint) ACTIVE_HINT_SHOW_ID = null;
+        if (restack) cancel_ui_source(restack);
+        if (hint) cancel_ui_source(hint);
+    }
+
     hide_border() {
+        if (ACTIVE_HINT_SHOW_ID?.owner === this) {
+            const request = ACTIVE_HINT_SHOW_ID;
+            ACTIVE_HINT_SHOW_ID = null;
+            cancel_ui_source(request);
+        }
         let b = this.border;
         if (b) b.hide();
     }

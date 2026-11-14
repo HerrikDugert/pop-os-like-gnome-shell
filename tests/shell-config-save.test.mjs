@@ -40,6 +40,7 @@ function fixture() {
         events_enabled = true;
         config_generation = 0;
         config_requests = new Set();
+        extension_timers = { stop() {} };
         exception_selecting = true;
         reopened = 0;
         reapplied = 0;

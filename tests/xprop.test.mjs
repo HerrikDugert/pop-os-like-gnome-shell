@@ -227,7 +227,7 @@ test('replaced window entity rejects stale decoration result', async () => {
 
 test('initialization is after storage insertion and disable/destroy cancel requests', () => {
     assert.match(extensionSource, /this.windows.insert\(entity, win\);\s*win.update_decoration\(this\);/);
-    assert.match(extensionSource, /window.destroying = true;\s*window.cancel_decoration\(\);/);
+    assert.match(extensionSource, /window.destroying = true;\s*this.extension_timers.cancel\(window.meta\);\s*window.stop_ui_work\(\);\s*window.cancel_decoration\(\);/);
     assert.match(extensionSource, /ext.stop_events\(\);\s*ext.stop_exception_dialog\(\);\s*ext.stop_window_io\(\);/);
     assert.match(extensionSource, /ext.signals_attach\(\);\s*ext.refresh_window_decorations\(\);/);
     assert.match(extensionSource, /allows_window_io\(\): boolean \{\s*return this.events_enabled;/);

@@ -17,6 +17,7 @@ import * as auto_tiler from './auto_tiler.js';
 import * as node from './node.js';
 import * as utils from './utils.js';
 import * as Executor from './executor.js';
+import { ExtensionTimers } from './extension_timers.js';
 import * as movement from './movement.js';
 import * as stack from './stack.js';
 import * as add_exception from './dialog_add_exception.js';
@@ -195,8 +196,6 @@ export class Ext extends Ecs.System<ExtEvent> {
     /** Record of misc. global objects and their attached signals */
     private signals: Map<GObject.Object, Array<SignalID>> = new Map();
 
-    private size_requests: Map<GObject.Object, SignalID> = new Map();
-
     /** Stores windows that were focused on a workspace */
     private workspace_active: Map<number, null | Entity> = new Map();
 
@@ -244,6 +243,12 @@ export class Ext extends Ecs.System<ExtEvent> {
     private events_enabled: boolean = true;
     private event_generation: number = 0;
     private idle_sources: Map<SignalID, object> = new Map();
+    private extension_timers = new ExtensionTimers({
+        add: (priority, delay, callback) => GLib.timeout_add(priority, delay, callback),
+        remove: source => { GLib.source_remove(source); },
+    }, () => this.events_enabled, () => this.event_generation, why => {
+        try { log.log(`Extension timer failed: ${why}`); } catch (_) { }
+    });
     private exception_ipc: utils.AsyncIPC | null = null;
     private exception_generation: number = 0;
     private exception_select_timer: SignalID | null = null;
@@ -445,13 +450,22 @@ export class Ext extends Ecs.System<ExtEvent> {
         return this.events_enabled;
     }
 
+    /** Changes on every event-owner stop, including a rapid disable/reenable. */
+    window_io_generation(): number {
+        return this.event_generation;
+    }
+
     refresh_window_decorations() {
         for (const window of this.windows.values()) window.update_decoration(this);
     }
 
     stop_window_io() {
         this.stop_config_io();
-        for (const window of this.windows.values()) window.cancel_decoration();
+        this.extension_timers.stop();
+        for (const window of this.windows.values()) {
+            window.stop_ui_work();
+            window.cancel_decoration();
+        }
     }
 
     // Extension methods
@@ -511,21 +525,10 @@ export class Ext extends Ecs.System<ExtEvent> {
 
     connect_window(win: Window.ShellWindow) {
         const size_event = () => {
-            const old = this.size_requests.get(win.meta);
-
-            if (old) {
-                try {
-                    GLib.source_remove(old);
-                } catch (_) { }
-            }
-
-            const new_s = GLib.timeout_add(GLib.PRIORITY_LOW, 500, () => {
+            this.extension_timers.schedule(win.meta, GLib.PRIORITY_LOW, 500, () => {
                 this.register(Events.window_event(win, WindowEvent.Size));
-                this.size_requests.delete(win.meta);
                 return false;
-            });
-
-            this.size_requests.set(win.meta, new_s);
+            }, () => this.windows.get(win.entity) === win && win.actor_exists());
         };
 
         this.connect_meta(win, 'workspace-changed', () => {
@@ -957,6 +960,8 @@ export class Ext extends Ecs.System<ExtEvent> {
         const stack = window.stack;
 
         window.destroying = true;
+        this.extension_timers.cancel(window.meta);
+        window.stop_ui_work();
         window.cancel_decoration();
 
         // Disconnect all signals on this window
@@ -2132,19 +2137,18 @@ export class Ext extends Ecs.System<ExtEvent> {
     }
 
     restack() {
-        // NOTE: Workaround for GNOME Shell showing our hidden windows on a workspace switch
+        // Retry for the current tiler only; repeated requests coalesce.
+        const tiler = this.auto_tiler;
         let attempts = 0;
-        GLib.timeout_add(GLib.PRIORITY_LOW, 50, () => {
-            if (this.auto_tiler) {
-                for (const container of this.auto_tiler.forest.stacks.values()) {
-                    container.restack();
-                }
+        this.extension_timers.schedule('stack-restack', GLib.PRIORITY_LOW, 50, current => {
+            if (!tiler) return false;
+            for (const container of tiler.forest.stacks.values()) {
+                if (!current()) return false;
+                container.restack();
             }
-
-            let x = attempts;
             attempts += 1;
-            return x < 10;
-        });
+            return attempts < 11;
+        }, () => tiler !== null && this.auto_tiler === tiler);
     }
 
     set_gap_inner(gap: number) {
